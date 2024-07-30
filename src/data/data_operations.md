@@ -1,7 +1,5 @@
 # Data Operations
 
-## Google Drive Folder Downloader
-
 ### Data Download
 
 The FastAPI application includes endpoints to access a Google Drive folder and download all documents within it using Python.
