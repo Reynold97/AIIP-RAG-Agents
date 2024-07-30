@@ -16,5 +16,5 @@ Make a .env file with the following structure:
 
 ## Usage
 
-For data operations, including data download, chunking, and indexing refer to [Data_Operations](src/data/Data_Operations.md)
+For data operations, including data download, chunking, and indexing refer to [Data_Operations](Agent-RAG/src/data/data_operations.md)
 
