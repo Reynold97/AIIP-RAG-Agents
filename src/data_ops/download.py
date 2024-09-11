@@ -12,9 +12,9 @@ from googleapiclient.errors import HttpError
 router = APIRouter()
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-CLIENT_SECRETS_FILE = 'credentials.json'
+CLIENT_SECRETS_FILE = 'configs/credentials.json'
 REDIRECT_URI = "http://localhost:8000/oauth2callback"
-DOWNLOAD_FOLDER = 'src/data/raw_data'
+DOWNLOAD_FOLDER = 'data/raw_data'
 
 def authenticate():
     flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES)
