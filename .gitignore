@@ -161,6 +161,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-configs/credentials.json
+app/configs/credentials.json
 raw_data
 token.pickle

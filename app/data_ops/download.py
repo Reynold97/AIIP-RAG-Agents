@@ -12,7 +12,7 @@ from googleapiclient.errors import HttpError
 router = APIRouter()
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-CLIENT_SECRETS_FILE = 'configs/credentials.json'
+CLIENT_SECRETS_FILE = 'app/configs/credentials.json'
 REDIRECT_URI = "http://localhost:8000/oauth2callback"
 DOWNLOAD_FOLDER = 'data/raw_data'
 
