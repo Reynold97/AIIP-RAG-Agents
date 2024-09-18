@@ -30,6 +30,7 @@ Make a .env file with the following structure:
 - Update Documentation
 - Add logging and code description
 - Add a node to capture the topic of the contents that are being added to the database, and dinamically add it to the prompts marked with #***#
+- Add new flow to suplement vectorstore content with werbsearch if necessary
 
 
 ## RAG Agents Comparison
