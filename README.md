@@ -18,6 +18,7 @@ Make a .env file with the following structure:
 ...
 
 ## Todos
+- Add UI
 - Ollama server
 - Dockerization
 - Use Supabase for user management with SQL and vector database with pgvector
