@@ -29,7 +29,7 @@ Make a .env file with the following structure:
 - Add Verbosity to the agents
 - Update Documentation
 - Add logging and code description
-- Add a node to capture the topic of the contents that are being added to the database, and dinamically add it to the prompts marked with #***#
+- Add an agent to the index pipeline to capture the topic of the contents that are being added to the database, and dinamically add it to the prompts marked with #***#
 - Add new flow to suplement vectorstore content with werbsearch if necessary
 
 
