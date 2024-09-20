@@ -164,4 +164,4 @@ cython_debug/
 app/configs/credentials.json
 raw_data
 token.pickle
-databases/chroma_db
+app/databases/chroma_db

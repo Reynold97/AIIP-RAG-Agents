@@ -32,7 +32,8 @@ Make a .env file with the following structure:
 - Add logging and code description
 - Add an agent to the index pipeline to capture the topic of the contents that are being added to the database, and dinamically add it to the prompts marked with #***#
 - Add new flow to suplement vectorstore content with werbsearch if necessary
-
+- Fix Tavily
+- Add web scrapper loader
 
 ## RAG Agents Comparison
 
