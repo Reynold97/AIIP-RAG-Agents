@@ -165,3 +165,4 @@ app/configs/credentials.json
 raw_data
 token.pickle
 app/databases/chroma_db
+.chainlit

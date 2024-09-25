@@ -34,6 +34,9 @@ Make a .env file with the following structure:
 - Add new flow to suplement vectorstore content with werbsearch if necessary
 - Fix Tavily
 - Add web scrapper loader
+- Try NVIDIA Nim RAG Agent https://www.nvidia.com/en-us/ai-data-science/ai-workflows/?ncid=ref-inpa-832194
+- Contextual indexing by Anthropic https://www.anthropic.com/news/contextual-retrieval
+- Add conversation memory
 
 ## RAG Agents Comparison
 

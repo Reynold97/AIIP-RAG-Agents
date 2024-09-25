@@ -17,6 +17,7 @@ The FastAPI application includes endpoints to access a Google Drive folder and d
      - Choose "Web application" as the application type.
      - Provide the authorized redirect URIs (e.g., `http://localhost:8000` for development).
    - Download the JSON file containing your client secret and rename it to `credentials.json`.
+   - Copy the file to the configs folder
    - Go to the OAuth consent screen of the [Google Cloud Console](https://console.cloud.google.com/) and make your app external, so any user can use it.
 
 2. **Install Necessary Libraries:**
