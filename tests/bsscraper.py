@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 # Starting point for the documentation
-base_url = "https://docs.chainlit.io/get-started/overview"
+base_url = "https://docs.chainlit.io/"
 visited_urls = set()
 
 # This list will store all the scraped content
