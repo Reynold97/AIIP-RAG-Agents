@@ -15,7 +15,11 @@ Make a .env file with the following structure:
 `OAUTHLIB_INSECURE_TRANSPORT=1` #To bypass HTPPS requirements during development
 
 ## Usage
-...
+
+```bash
+uvicorn app.api.app:app
+streamlit run ui/streamlit/Home.py
+```
 
 ## Todos
 - Add UI
@@ -33,7 +37,7 @@ Make a .env file with the following structure:
 - Add an agent to the index pipeline to capture the topic of the contents that are being added to the database, and dinamically add it to the prompts marked with #***#
 - Add new flow to suplement vectorstore content with werbsearch if necessary
 - Fix Tavily
-- Add web scrapper loader
+- Add web scrapper loader. Structured output for specific information retrieval out of the whole scrape.
 - Try NVIDIA Nim RAG Agent https://www.nvidia.com/en-us/ai-data-science/ai-workflows/?ncid=ref-inpa-832194
 - Contextual indexing by Anthropic https://www.anthropic.com/news/contextual-retrieval
 - Add conversation memory

@@ -9,7 +9,7 @@ from googleapiclient.errors import HttpError
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 CLIENT_SECRETS_FILE = 'app/configs/credentials.json'
-REDIRECT_URI = "http://localhost:8000/oauth2callback"
+REDIRECT_URI = "http://localhost:8000/gdrive/oauth2callback"
 DOWNLOAD_FOLDER = 'data/raw_data'
 
 def authenticate():
