@@ -16,9 +16,27 @@ class SimpleIndexChromaPipeline:
         # Load PDF
         loader = self.loader(file_path)
         documents = loader.load()
+        
+        # Add file metadata to each document
+        filename = os.path.basename(file_path)
+        for doc in documents:
+            doc.metadata.update({
+                "source_file": filename,
+                "file_path": file_path,
+                "page_number": doc.metadata.get("page", 1)
+            })
 
         # Chunk documents
         chunked_documents = self.chunker.split_documents(documents)
+        
+        # Ensure metadata is preserved in chunks
+        for chunk in chunked_documents:
+            if not chunk.metadata.get("source_file"):
+                chunk.metadata.update({
+                    "source_file": filename,
+                    "file_path": file_path,
+                    "page_number": chunk.metadata.get("page", 1)
+                })
 
         # Index documents
         self.indexer.add_documents(chunked_documents)

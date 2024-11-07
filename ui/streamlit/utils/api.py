@@ -2,6 +2,8 @@ import requests
 from typing import Optional, Dict, Any, List
 import logging
 from pathlib import Path
+import os
+from contextlib import ExitStack
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +69,48 @@ class ChromaIndexClient:
     def __init__(self, endpoints: Dict[str, str]):
         self.endpoints = endpoints
         
-    def add_documents(self, collection_name: str, documents: List[Dict[str, Any]]) -> Dict[str, str]:
-        """Add documents to collection"""
-        url = f"{self.endpoints['add_documents']}/{collection_name}/add_documents"
-        return APIClient.make_request("POST", url, json=documents)
+    def process_pdfs(self, collection_name: str, file_paths: List[str]) -> Dict[str, str]:
+        """Process PDF files and add to collection"""
+        url = f"{self.endpoints['process_pdfs']}/{collection_name}/process_pdfs"
+        
+        # Use ExitStack to manage multiple file handles
+        with ExitStack() as stack:
+            files = []
+            for file_path in file_paths:
+                try:
+                    # Ensure we have absolute path
+                    abs_path = os.path.abspath(file_path)
+                    if os.path.exists(abs_path) and abs_path.lower().endswith('.pdf'):
+                        # Open file and add to stack
+                        f = stack.enter_context(open(abs_path, 'rb'))
+                        filename = os.path.basename(abs_path)
+                        files.append(('files', (filename, f, 'application/pdf')))
+                    else:
+                        logger.warning(f"Skipping invalid file: {file_path}")
+                except Exception as e:
+                    logger.error(f"Error processing file {file_path}: {str(e)}")
+                    raise
+            
+            if not files:
+                raise ValueError("No valid PDF files to process")
+            
+            # Make the request with all files open
+            return APIClient.make_request("POST", url, files=files)
     
     def search_documents(self, collection_name: str, query: str, k: int = 4) -> Dict[str, List]:
         """Search documents in collection"""
         url = f"{self.endpoints['search']}/{collection_name}/search"
         return APIClient.make_request("GET", url, params={"query": query, "k": k})
+    
+    def count_documents(self, collection_name: str) -> Dict[str, int]:
+        """Get document count in collection"""
+        url = f"{self.endpoints['count']}/{collection_name}/count"
+        return APIClient.make_request("GET", url)
+    
+    def add_documents(self, collection_name: str, documents: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Add documents to collection"""
+        url = f"{self.endpoints['add_documents']}/{collection_name}/add_documents"
+        return APIClient.make_request("POST", url, json=documents)
     
     def delete_document(self, collection_name: str, document_id: str) -> Dict[str, str]:
         """Delete document from collection"""
@@ -86,22 +121,6 @@ class ChromaIndexClient:
         """Update document in collection"""
         url = f"{self.endpoints['update_document']}/{collection_name}/documents/{document_id}"
         return APIClient.make_request("PUT", url, json=document)
-    
-    def count_documents(self, collection_name: str) -> Dict[str, int]:
-        """Get document count in collection"""
-        url = f"{self.endpoints['count']}/{collection_name}/count"
-        return APIClient.make_request("GET", url)
-    
-    def process_pdfs(self, collection_name: str, pdf_files: List[Path]) -> Dict[str, str]:
-        """Process PDF files and add to collection"""
-        url = f"{self.endpoints['process_pdfs']}/{collection_name}/process_pdfs"
-        files = [("files", (f.name, open(f, "rb"), "application/pdf")) for f in pdf_files]
-        return APIClient.make_request("POST", url, files=files)
-    
-    def process_folder(self, collection_name: str, folder_path: str) -> Dict[str, str]:
-        """Process folder of PDFs and add to collection"""
-        url = f"{self.endpoints['process_folder']}/{collection_name}/process_folder"
-        return APIClient.make_request("POST", url, json={"folder_path": folder_path})
 
 class GDriveClient:
     """Client for Google Drive operations"""

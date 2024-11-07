@@ -13,10 +13,14 @@ async def authorize():
 
 @router.get("/oauth2callback")
 async def oauth2callback(request: Request):
-    state = request.query_params.get('state')
-    authorization_response = str(request.url)
-    gdrive_loader.set_credentials(authorization_response, state)
-    return RedirectResponse(url="/")
+    try:
+        state = request.query_params.get('state')
+        authorization_response = str(request.url)
+        gdrive_loader.set_credentials(authorization_response, state)
+        # Redirect to the Streamlit UI with a success parameter
+        return RedirectResponse(url="http://localhost:8501/Chroma_Index_Operations?auth_success=true")
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
 
 @router.get("/download_files/{folder_id}")
 async def download_files(folder_id: str):

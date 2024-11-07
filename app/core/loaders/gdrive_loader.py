@@ -1,5 +1,8 @@
 import os
 from app.services import google_drive
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GDriveLoader:
     def __init__(self):
@@ -13,21 +16,24 @@ class GDriveLoader:
         google_drive.save_credentials(creds)
 
     def initialize_service(self):
-        self.service = google_drive.get_service()
+        if not self.service:
+            self.service = google_drive.get_service()
 
     def download_files(self, folder_id):
-        if not self.service:
-            self.initialize_service()
+        """Download files from a Google Drive folder"""
+        try:
+            if not self.service:
+                self.initialize_service()
 
-        files = google_drive.list_files_in_folder(self.service, folder_id)
-        if not files:
-            return []
+            downloaded_files = google_drive.download_files(self.service, folder_id)
+            
+            if not downloaded_files:
+                logger.warning(f"No files found in folder {folder_id}")
+                return []
 
-        downloaded_files = []
-        os.makedirs(google_drive.DOWNLOAD_FOLDER, exist_ok=True)
-        for file in files:
-            if file['mimeType'] != 'application/vnd.google-apps.folder':
-                file_path = google_drive.download_file(self.service, file['id'], file['name'])
-                downloaded_files.append(file_path)
+            # Return only the filenames for the UI
+            return [os.path.basename(file_path) for file_path in downloaded_files]
 
-        return downloaded_files
+        except Exception as e:
+            logger.error(f"Error downloading files: {str(e)}")
+            raise
