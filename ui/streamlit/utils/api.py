@@ -1,6 +1,7 @@
 import requests
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -11,27 +12,17 @@ class APIClient:
         url: str,
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Dict[str, Any]] = None,
+        files: Optional[Dict[str, Any]] = None,
         raise_for_status: bool = True
     ) -> Dict[str, Any]:
-        """
-        Make a request to the API endpoint.
-        
-        Args:
-            method: HTTP method to use
-            url: URL to make request to
-            params: Query parameters
-            json: JSON body
-            raise_for_status: Whether to raise an exception for error status codes
-            
-        Returns:
-            Response data as dictionary
-        """
+        """Make a request to the API endpoint."""
         try:
             response = requests.request(
                 method=method,
                 url=url,
                 params=params,
-                json=json
+                json=json,
+                files=files
             )
             
             if raise_for_status:
@@ -69,3 +60,60 @@ class ChromaDBClient:
     def list_collections(self) -> Dict[str, list]:
         """List all collections"""
         return APIClient.make_request("GET", self.endpoints["list_collections"])
+
+class ChromaIndexClient:
+    """Client for Chroma indexing operations"""
+    
+    def __init__(self, endpoints: Dict[str, str]):
+        self.endpoints = endpoints
+        
+    def add_documents(self, collection_name: str, documents: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Add documents to collection"""
+        url = f"{self.endpoints['add_documents']}/{collection_name}/add_documents"
+        return APIClient.make_request("POST", url, json=documents)
+    
+    def search_documents(self, collection_name: str, query: str, k: int = 4) -> Dict[str, List]:
+        """Search documents in collection"""
+        url = f"{self.endpoints['search']}/{collection_name}/search"
+        return APIClient.make_request("GET", url, params={"query": query, "k": k})
+    
+    def delete_document(self, collection_name: str, document_id: str) -> Dict[str, str]:
+        """Delete document from collection"""
+        url = f"{self.endpoints['delete_document']}/{collection_name}/documents/{document_id}"
+        return APIClient.make_request("DELETE", url)
+    
+    def update_document(self, collection_name: str, document_id: str, document: Dict[str, Any]) -> Dict[str, str]:
+        """Update document in collection"""
+        url = f"{self.endpoints['update_document']}/{collection_name}/documents/{document_id}"
+        return APIClient.make_request("PUT", url, json=document)
+    
+    def count_documents(self, collection_name: str) -> Dict[str, int]:
+        """Get document count in collection"""
+        url = f"{self.endpoints['count']}/{collection_name}/count"
+        return APIClient.make_request("GET", url)
+    
+    def process_pdfs(self, collection_name: str, pdf_files: List[Path]) -> Dict[str, str]:
+        """Process PDF files and add to collection"""
+        url = f"{self.endpoints['process_pdfs']}/{collection_name}/process_pdfs"
+        files = [("files", (f.name, open(f, "rb"), "application/pdf")) for f in pdf_files]
+        return APIClient.make_request("POST", url, files=files)
+    
+    def process_folder(self, collection_name: str, folder_path: str) -> Dict[str, str]:
+        """Process folder of PDFs and add to collection"""
+        url = f"{self.endpoints['process_folder']}/{collection_name}/process_folder"
+        return APIClient.make_request("POST", url, json={"folder_path": folder_path})
+
+class GDriveClient:
+    """Client for Google Drive operations"""
+    
+    def __init__(self, endpoints: Dict[str, str]):
+        self.endpoints = endpoints
+        
+    def get_auth_url(self) -> str:
+        """Get Google Drive authorization URL"""
+        return self.endpoints["authorize"]
+    
+    def download_files(self, folder_id: str) -> Dict[str, Any]:
+        """Download files from Google Drive folder"""
+        url = f"{self.endpoints['download_files']}/{folder_id}"
+        return APIClient.make_request("GET", url)

@@ -17,6 +17,7 @@ Make a .env file with the following structure:
 ## Usage
 
 ```bash
+conda activate ./env
 uvicorn app.api.app:app
 streamlit run ui/streamlit/Home.py
 ```
