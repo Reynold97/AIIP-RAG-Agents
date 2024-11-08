@@ -50,22 +50,19 @@ def render_gdrive_section(gdrive_client: GDriveClient):
     
     # Step 1: Authorization
     if not st.session_state.drive_authorized:
-        auth_col1, auth_col2 = st.columns([2, 1])
-        with auth_col1:
-            st.write("🔐 Connect to Google Drive to access your files")
-        with auth_col2:
-            if st.button("Connect to Google Drive", type="primary"):
-                try:
-                    auth_url = gdrive_client.get_auth_url()
-                    st.markdown(
-                        """
-                        1. Click the link below to authorize access to Google Drive
-                        2. After authorization, you'll be redirected back automatically
-                        """
-                    )
-                    st.markdown(f"[Click here to authorize]({auth_url})")
-                except Exception as e:
-                    show_status_message(f"Error connecting to Google Drive: {str(e)}", type="error")
+        st.write("🔐 Connect to Google Drive to access your files")
+        if st.button("Connect to Google Drive", type="primary"):
+            try:
+                auth_url = gdrive_client.get_auth_url()
+                st.markdown(
+                    """
+                    1. Click the link below to authorize access to Google Drive
+                    2. After authorization, you'll be redirected back automatically
+                    """
+                )
+                st.markdown(f"[Click here to authorize]({auth_url})")
+            except Exception as e:
+                show_status_message(f"Error connecting to Google Drive: {str(e)}", type="error")
         return
     
     # Step 2: Folder Selection (only shown after authorization)
@@ -77,19 +74,29 @@ def render_gdrive_section(gdrive_client: GDriveClient):
             help="Enter the Google Drive folder ID containing your PDFs"
         )
         submit_button = st.form_submit_button("Download Files", type="primary")
-        
-        if submit_button and folder_id:
-            try:
-                with st.spinner("Downloading files from Drive..."):
-                    response = gdrive_client.download_files(folder_id)
-                    if response.get("files"):
-                        st.session_state.downloaded_files = response["files"]
-                        show_operation_status("File download")
-                        st.rerun()
-                    else:
-                        st.info("No files found in the specified folder")
-            except Exception as e:
-                show_status_message(f"Error downloading files: {str(e)}", type="error")
+    
+    # Process download outside the form to maintain success message
+    if submit_button and folder_id:
+        try:
+            with st.spinner("Downloading files from Drive..."):
+                response = gdrive_client.download_files(folder_id)
+                if response and isinstance(response, dict) and response.get("files"):
+                    downloaded_files = response["files"]
+                    st.session_state.downloaded_files = downloaded_files
+                    file_count = len(downloaded_files)
+                    logger.info(f"Downloaded files: {downloaded_files}")
+                    
+                    # Create success message with file names using markdown
+                    success_msg = [
+                        f"✨ Successfully downloaded {file_count} document{'s' if file_count > 1 else ''}:",
+                        "",  # Empty line for spacing
+                        *[f"* {file}" for file in downloaded_files]
+                    ]
+                    st.success("\n".join(success_msg))
+                else:
+                    st.info("No files found in the specified folder")
+        except Exception as e:
+            show_status_message(f"Error downloading files: {str(e)}", type="error")
 
 def render_local_upload():
     """Render local file upload section"""
