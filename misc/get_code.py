@@ -1,10 +1,10 @@
 import os
 
 # Root folder of your repository
-root_folder_path = 'app'  # Replace with the actual root folder path
+root_folder_path = 'ui'  # Replace with the actual root folder path
 
 # Output .txt file path
-output_file = 'all_code.txt'  # Replace with desired output file location
+output_file = 'ui_code.txt'  # Replace with desired output file location
 
 # Open the output file in write mode
 with open(output_file, 'w') as outfile:
