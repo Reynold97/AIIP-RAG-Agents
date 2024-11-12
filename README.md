@@ -58,11 +58,14 @@ This project is designed to be completely modular. Every aspect of the system is
 - Docker containerization
 - Azure OCR integration
 - Conversation memory
-- Dynamic topic extraction, to capture the topic of the contents that are being added to the collection, and dinamically add it to the searching and feedback prompts. 
+- Dynamic topic extraction, to capture the topic of the contents that are being added to the collection, and dynamically add it to the searching and feedback prompts. 
 - Add web scrapper loader. Structured output for specific information retrieval out of the whole scrape.
 - Try NVIDIA Nim RAG Agent https://www.nvidia.com/en-us/ai-data-science/ai-workflows/?ncid=ref-inpa-832194
-- Contextual indexing by Anthropic https://www.anthropic.com/news/contextual-retrieval
+- Contextual indexing by Anthropic https://www.anthropic.com/news/contextual-retrieval and otrher chunking techniques
 - Add Verbosity to the agents
+- Implement multiple query retrieval
+- Multicollection search
+
 
 ## Technical Architecture
 
