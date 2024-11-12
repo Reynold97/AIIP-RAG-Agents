@@ -65,6 +65,8 @@ This project is designed to be completely modular. Every aspect of the system is
 - Add Verbosity to the agents
 - Implement multiple query retrieval
 - Multicollection search
+- System metrics, number of vectors, RAM used.
+- Feature to modify the conversation memory.
 
 
 ## Technical Architecture
