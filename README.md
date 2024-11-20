@@ -178,7 +178,7 @@ graph TD
 ### Prerequisites
 
 #### 1. Python Environment Setup
-- Python 3.8 or higher required
+- Python 3.10 or higher required
 - Choice of virtual environment:
 ```bash
 # Using venv
@@ -187,8 +187,8 @@ source env/bin/activate  # Linux/Mac
 .\env\Scripts\activate   # Windows
 
 # Using conda
-conda create -n rag-env python=3.8
-conda activate rag-env
+conda create -n env python=3.10
+conda activate env
 ```
 
 #### 2. Google Cloud Project Setup

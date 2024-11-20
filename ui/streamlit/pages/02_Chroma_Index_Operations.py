@@ -227,7 +227,7 @@ def render_collection_documents(client: ChromaIndexClient, collection_name: str)
                 
                 # Search interface
                 query = st.text_input("Search Query", key="search_input")
-                k = st.slider("Number of results", min_value=1, max_value=10, value=4)
+                k = st.slider("Number of results", min_value=1, max_value=20, value=4)
                 
                 # Only perform search if query changes or button is clicked
                 if st.button("Search", disabled=not query) or (query != st.session_state.search_query and query):

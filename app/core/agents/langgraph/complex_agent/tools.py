@@ -4,4 +4,4 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-web_search_tool = TavilySearchResults(k=3)
+web_search_tool = TavilySearchResults(k=4)

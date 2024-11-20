@@ -10,10 +10,11 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 @router.post("/simple_rag/{collection_name}/query")
 async def query_simple_rag_agent(
     collection_name: str,
+    k: int = 4,
     question: str = Query(..., description="The question to ask the RAG agent")
 ):
     try:
-        agent = create_chroma_simple_rag_agent(collection_name)
+        agent = create_chroma_simple_rag_agent(collection_name, k)
         result = agent.run(question)
         return result
     except Exception as e:
@@ -22,10 +23,11 @@ async def query_simple_rag_agent(
 @router.post("/simple_rag/{collection_name}/stream")
 async def stream_simple_rag_agent(
     collection_name: str,
+    k: int = 4,
     question: str = Query(..., description="The question to ask the RAG agent")
 ):
     try:
-        agent = create_chroma_simple_rag_agent(collection_name)
+        agent = create_chroma_simple_rag_agent(collection_name, k)
         
         def event_generator():
             for output in agent.stream(question):

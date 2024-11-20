@@ -1,0 +1,275 @@
+File Name: app.py
+========================================
+from fastapi import FastAPI
+from app.api.routers import download_router, chromadb_router, chromaindexer_router, chromaagent_router
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI()
+
+app.include_router(download_router.router)
+app.include_router(chromadb_router.router)
+app.include_router(chromaindexer_router.router)
+app.include_router(chromaagent_router.router)
+
+@app.get("/")
+def root():
+    return {"message": "Welcome to AIIP AI Agents"}
+========================================
+
+File Name: __init__.py
+========================================
+
+========================================
+
+File Name: routers\chromaagent_router.py
+========================================
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from app.core.agents.langgraph.simple_agent import create_chroma_simple_rag_agent
+from app.core.agents.langgraph.complex_agent.agent import ComplexRAGAgent
+import json
+import logging
+
+router = APIRouter(prefix="/agent", tags=["Agent"])
+
+@router.post("/simple_rag/{collection_name}/query")
+async def query_simple_rag_agent(
+    collection_name: str,
+    question: str = Query(..., description="The question to ask the RAG agent")
+):
+    try:
+        agent = create_chroma_simple_rag_agent(collection_name)
+        result = agent.run(question)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/simple_rag/{collection_name}/stream")
+async def stream_simple_rag_agent(
+    collection_name: str,
+    question: str = Query(..., description="The question to ask the RAG agent")
+):
+    try:
+        agent = create_chroma_simple_rag_agent(collection_name)
+        
+        def event_generator():
+            for output in agent.stream(question):
+                yield f"data: {json.dumps(output)}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/complex_rag/query")
+async def query_complex_rag_agent(
+    question: str = Query(..., description="The question to ask the complex RAG agent")
+):
+    try:
+        agent = ComplexRAGAgent()
+        result = agent.run(question)
+        if result.startswith("Error:"):
+            raise HTTPException(status_code=500, detail=result)
+        return {"answer": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/complex_rag/stream")
+async def stream_complex_rag_agent(
+    question: str = Query(..., description="The question to ask the complex RAG agent")
+):
+    try:
+        agent = ComplexRAGAgent()
+        
+        def event_generator():
+            for output in agent.stream(question):
+                if isinstance(output, dict) and "error" in output:
+                    yield f"data: {json.dumps({'error': output['error']})}\n\n"
+                    break
+                yield f"data: {json.dumps(output)}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+========================================
+
+File Name: routers\chromadb_router.py
+========================================
+from fastapi import APIRouter, HTTPException
+from app.databases.chroma_db import chroma_db
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/chromadb", tags=["Databases"])
+
+@router.post("/create")
+async def create_database():
+    try:
+        chroma_db.initialize_db()
+        return {"message": "Database created successfully"}
+    except Exception as e:
+        logger.error(f"Error creating database: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/collections/{collection_name}")
+async def create_collection(collection_name: str):
+    try:
+        chroma_db.create_collection(collection_name)
+        return {"message": f"Collection '{collection_name}' created successfully"}
+    except Exception as e:
+        logger.error(f"Error creating collection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/collections/{collection_name}")
+async def delete_collection(collection_name: str):
+    try:
+        chroma_db.delete_collection(collection_name)
+        return {"message": f"Collection '{collection_name}' deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting collection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/collections")
+async def list_collections():
+    try:
+        collections = chroma_db.list_collections()
+        return {"collections": collections}
+    except Exception as e:
+        logger.error(f"Error listing collections: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+========================================
+
+File Name: routers\chromaindexer_router.py
+========================================
+from fastapi import APIRouter, HTTPException, Body, File, UploadFile
+from typing import List
+from app.core.indexers.chroma_indexer import ChromaIndexer
+from app.core.pipes.simple_index_pipeline import SimpleIndexChromaPipeline
+from langchain_core.documents import Document
+import tempfile
+import os
+
+router = APIRouter(prefix="/chroma", tags=["Chroma Index Operations"])
+
+# Original Indexer Endpoints
+
+@router.post("/{collection_name}/add_documents")
+async def add_documents(collection_name: str, documents: List[dict] = Body(...)):
+    try:
+        indexer = ChromaIndexer(collection_name)
+        docs = [Document(**doc) for doc in documents]
+        indexer.add_documents(docs)
+        return {"message": f"{len(docs)} documents added to collection '{collection_name}'"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{collection_name}/search")
+async def search_documents(collection_name: str, query: str, k: int = 4):
+    try:
+        indexer = ChromaIndexer(collection_name)
+        results = indexer.similarity_search(query, k)
+        return {"results": [doc.dict() for doc in results]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{collection_name}/documents/{document_id}")
+async def delete_document(collection_name: str, document_id: str):
+    try:
+        indexer = ChromaIndexer(collection_name)
+        indexer.delete_document(document_id)
+        return {"message": f"Document '{document_id}' deleted from collection '{collection_name}'"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/{collection_name}/documents/{document_id}")
+async def update_document(collection_name: str, document_id: str, document: dict = Body(...)):
+    try:
+        indexer = ChromaIndexer(collection_name)
+        doc = Document(**document)
+        indexer.update_document(document_id, doc)
+        return {"message": f"Document '{document_id}' updated in collection '{collection_name}'"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{collection_name}/count")
+async def count_documents(collection_name: str):
+    try:
+        indexer = ChromaIndexer(collection_name)
+        count = indexer.count_documents()
+        return {"count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Pipeline Processing Endpoints
+
+@router.post("/{collection_name}/process_pdfs")
+async def process_pdfs(collection_name: str, files: List[UploadFile] = File(...)):
+    try:
+        pipeline = SimpleIndexChromaPipeline(collection_name)
+        processed_docs = []
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for file in files:
+                temp_file_path = os.path.join(temp_dir, file.filename)
+                with open(temp_file_path, "wb") as buffer:
+                    buffer.write(await file.read())
+                processed_docs.extend(pipeline.process_pdf(temp_file_path))
+        
+        return {"message": f"{len(processed_docs)} documents processed and added to collection '{collection_name}'"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_name}/process_folder")
+async def process_folder(collection_name: str, folder_path: str = Body(..., embed=True)):
+    try:
+        pipeline = SimpleIndexChromaPipeline(collection_name)
+        processed_docs = pipeline.process_folder(folder_path)
+        return {"message": f"{len(processed_docs)} documents processed and added to collection '{collection_name}'"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+========================================
+
+File Name: routers\download_router.py
+========================================
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import RedirectResponse
+from app.core.loaders.gdrive_loader import GDriveLoader
+
+router = APIRouter(prefix="/gdrive", tags=["Google Drive"])
+
+gdrive_loader = GDriveLoader()
+
+@router.get("/authorize")
+async def authorize():
+    authorization_url, _ = gdrive_loader.authenticate()
+    return RedirectResponse(url=authorization_url)
+
+@router.get("/oauth2callback")
+async def oauth2callback(request: Request):
+    try:
+        state = request.query_params.get('state')
+        authorization_response = str(request.url)
+        gdrive_loader.set_credentials(authorization_response, state)
+        # Redirect to the Streamlit UI with a success parameter
+        return RedirectResponse(url="http://localhost:8501/Chroma_Index_Operations?auth_success=true")
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+@router.get("/download_files/{folder_id}")
+async def download_files(folder_id: str):
+    try:
+        downloaded_files = gdrive_loader.download_files(folder_id)
+        if not downloaded_files:
+            raise HTTPException(status_code=404, detail=f"No files found in folder ID: {folder_id}")
+        return {"message": f"Files downloaded successfully!", "files": downloaded_files}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+========================================
+
+File Name: routers\__init__.py
+========================================
+
+========================================
+

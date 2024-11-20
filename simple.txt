@@ -1,0 +1,144 @@
+File Name: agent.py
+========================================
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import RunnableSequence
+from .graph import build_rag_pipeline
+from .state import GraphState
+
+class SimpleRAGAgent:
+    def __init__(self, retriever: BaseRetriever, generation_chain: RunnableSequence, max_retrievals: int = 4):
+        self.retriever = retriever
+        self.generation_chain = generation_chain
+        self.pipeline = build_rag_pipeline(self.retriever, self.generation_chain)
+
+    def run(self, question: str):
+        inputs = {"question": question}
+        result = self.pipeline.invoke(inputs)
+        return result["generation"]
+
+    def stream(self, question: str):
+        inputs = {"question": question}
+        for output in self.pipeline.stream(inputs, stream_mode='updates'):
+            yield output
+               
+            
+========================================
+
+File Name: chains.py
+========================================
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
+from dotenv import load_dotenv
+from .prompts import rag_prompt
+
+load_dotenv()
+
+llm_engine = ChatOpenAI(model='gpt-4o-mini')  
+rag_chain = rag_prompt | llm_engine | StrOutputParser()
+========================================
+
+File Name: graph.py
+========================================
+from langgraph.graph import StateGraph, START, END
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import RunnableSequence
+from .state import GraphState
+from .nodes import create_retriever_node, create_generation_node
+
+def build_rag_pipeline(retriever: BaseRetriever, generation_chain: RunnableSequence):
+    pipeline = StateGraph(GraphState)
+    
+    # Create nodes
+    retriever_node = create_retriever_node(retriever)
+    generator_node = create_generation_node(generation_chain)
+    
+    # Add nodes
+    pipeline.add_node('retrieval_node', retriever_node)
+    pipeline.add_node('generator_node', generator_node)
+    
+    # Connect nodes
+    pipeline.add_edge(START, 'retrieval_node')
+    pipeline.add_edge('retrieval_node', 'generator_node')
+    pipeline.add_edge('generator_node', END)
+    
+    return pipeline.compile()
+========================================
+
+File Name: nodes.py
+========================================
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import RunnableSequence
+from app.core.indexers.chroma_indexer import ChromaIndexer
+from .chains import rag_chain
+from .state import GraphState
+
+def create_retriever_node(retriever: BaseRetriever):
+    def retriever_node(state: GraphState):
+        new_documents = retriever.invoke(state.question)
+        new_documents = [d.page_content for d in new_documents]
+        state.documents.extend(new_documents)
+        return {"documents": state.documents}
+    return retriever_node
+
+def create_generation_node(generation_chain: RunnableSequence):
+    def generation_node(state: GraphState):
+        generation = generation_chain.invoke({
+            "context": "\n\n".join(state.documents), 
+            "question": state.question, 
+        })
+        return {"generation": generation}
+    return generation_node
+========================================
+
+File Name: prompts.py
+========================================
+from langchain_core.prompts import ChatPromptTemplate
+
+system_prompt = """
+You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. 
+If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
+Only provide the answer and nothing else!
+"""
+
+human_prompt = """
+Question: {question}
+
+Context: 
+{context}
+
+Answer:
+"""
+
+rag_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+
+========================================
+
+File Name: state.py
+========================================
+from typing import List, Optional
+from pydantic import BaseModel
+
+class GraphState(BaseModel):
+    question: Optional[str] = None
+    generation: Optional[str] = None
+    documents: List[str] = []
+========================================
+
+File Name: __init__.py
+========================================
+from .agent import SimpleRAGAgent
+from app.core.indexers.chroma_indexer import ChromaIndexer
+from .chains import rag_chain
+
+def create_chroma_simple_rag_agent(collection_name: str = "default_collection", k: int = 4):
+    indexer = ChromaIndexer(collection_name)
+    retriever = indexer.as_retriever(k)
+    return SimpleRAGAgent(retriever, rag_chain)
+========================================
+

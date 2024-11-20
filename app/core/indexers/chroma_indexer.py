@@ -22,9 +22,13 @@ class ChromaIndexer:
         self.vectorstore.delete([document_id])
         #self.vectorstore.persist()
     
-    def as_retriever(self, search_kwargs=None):
-        if search_kwargs is None:
-            search_kwargs = {"k": 4}
+    def as_retriever(self, k: int = 4):
+        """Return retriever initialized with specified number of documents to retrieve.
+        
+        Args:
+            k (int): Number of documents to retrieve (default: 4)
+        """
+        search_kwargs = {"k": k}
         return self.vectorstore.as_retriever(search_kwargs=search_kwargs)
     
     def get_collection(self):

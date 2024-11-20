@@ -1,10 +1,10 @@
 import os
 
 # Root folder of your repository
-root_folder_path = 'ui'  # Replace with the actual root folder path
+root_folder_path = r'app\core\agents\langgraph\complex_agent'  # Replace with the actual root folder path
 
 # Output .txt file path
-output_file = 'ui_code.txt'  # Replace with desired output file location
+output_file = 'complex.txt'  # Replace with desired output file location
 
 # Open the output file in write mode
 with open(output_file, 'w', encoding='utf-8') as outfile:

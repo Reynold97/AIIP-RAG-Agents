@@ -4,7 +4,7 @@ from .graph import build_rag_pipeline
 from .state import GraphState
 
 class SimpleRAGAgent:
-    def __init__(self, retriever: BaseRetriever, generation_chain: RunnableSequence):
+    def __init__(self, retriever: BaseRetriever, generation_chain: RunnableSequence, max_retrievals: int = 4):
         self.retriever = retriever
         self.generation_chain = generation_chain
         self.pipeline = build_rag_pipeline(self.retriever, self.generation_chain)
