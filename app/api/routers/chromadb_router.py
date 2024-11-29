@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.databases.chroma_db import chroma_db
+from app.core.indexers.chroma_indexer import chroma_db
 import logging
 
 logger = logging.getLogger(__name__)

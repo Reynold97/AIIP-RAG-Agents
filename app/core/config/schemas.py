@@ -11,7 +11,8 @@ class DatabaseConfig(BaseModel):
     """Base state for Database configurations"""
     database_name: str  # e.g., "ChromaDB", "Pinecone", etc.
     collection_name: str
-    k: int # Number of documents to retrieve
+    database_parameters: Dict[str, Any] = {}  # Additional database parameters
+    search_parameters: Dict[str, Any] = {}  # Additional search parameters like k
 
 class AgentConfig(BaseModel):
     """Base state for Agent configurations"""
