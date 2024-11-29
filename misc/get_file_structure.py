@@ -15,8 +15,8 @@ def generate_file_structure(directory, output_file):
 
 def main():
     # Specify the path of the folder you want to get the structure of
-    directory = "ui"  # Change '.' to your desired directory path if needed
-    output_file = "ui_structure.txt"
+    directory = "app"  # Change '.' to your desired directory path if needed
+    output_file = "app_structure.txt"
     
     generate_file_structure(directory, output_file)
     print(f"File structure saved to '{output_file}'")
