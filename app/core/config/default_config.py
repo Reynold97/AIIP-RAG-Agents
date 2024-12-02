@@ -10,25 +10,21 @@ from .schemas import (
 # Available Language Models
 AVAILABLE_LLMS: Dict[str, LLMConfig] = {
     "gpt-4o-mini": LLMConfig(
-        model_name="gpt-4o-mini",
-        model_type="openai",
+        name="gpt-4o-mini",
+        type="openai",
         parameters={
             "temperature": 0.7,
         }
     ),
-    
 }
 
 # Available Embedding Models
 AVAILABLE_EMBEDDINGS: Dict[str, EmbeddingConfig] = {
     "text-embedding-3-small": EmbeddingConfig(
-        model_name="text-embedding-3-small",
-        model_type="openai",
-        parameters={
-           
-        }
+        name="text-embedding-3-small",
+        type="openai",
+        parameters={}
     ),
-    
 }
 
 # Available Vector Stores
@@ -40,7 +36,7 @@ AVAILABLE_SEARCH_TYPES = ["similarity", "mmr", "similarity_score_threshold"]
 # Default Configurations
 DEFAULT_LLM = AVAILABLE_LLMS["gpt-4o-mini"]
 
-DEFAULT_EMBEDDING = AVAILABLE_EMBEDDINGS["openai-ada-002"]
+DEFAULT_EMBEDDING = AVAILABLE_EMBEDDINGS["text-embedding-3-small"]
 
 DEFAULT_DATABASE = DatabaseConfig(
     database_type="ChromaDB",
@@ -54,9 +50,7 @@ DEFAULT_DATABASE = DatabaseConfig(
 DEFAULT_RETRIEVER = RetrieverConfig(
     search_type="similarity",
     k=4,
-    search_parameters={
-        
-    }
+    search_parameters={}
 )
 
 DEFAULT_AGENT_CONFIG = AgentConfig(
