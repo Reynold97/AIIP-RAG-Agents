@@ -3,6 +3,7 @@ from typing import List
 from langchain_community.document_loaders import PyPDFLoader
 from app.core.chunkers.simple_chunker import SimpleChunker
 from app.core.indexers.chroma_indexer import ChromaIndexer
+from app.core.config.schemas import RetrieverConfig
 from langchain_core.documents import Document
 import logging
 
@@ -18,10 +19,13 @@ class SimpleIndexChromaPipeline:
             chunk_overlap: Overlap between chunks (default: 200)
         """
         try:
+            # Create retriever config
+            self.retriever_config = RetrieverConfig(collection_name=collection_name)
+            
             self.collection_name = collection_name
             self.loader = PyPDFLoader
             self.chunker = SimpleChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-            self.indexer = ChromaIndexer(collection_name)
+            self.indexer = ChromaIndexer(self.retriever_config)
         except Exception as e:
             logger.error(f"Error initializing pipeline: {str(e)}")
             raise

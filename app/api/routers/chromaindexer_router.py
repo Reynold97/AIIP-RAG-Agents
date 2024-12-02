@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Body, File, UploadFile, Query
 from typing import List, Optional
+from app.core.config.schemas import RetrieverConfig
 from app.core.indexers.chroma_indexer import ChromaIndexer
 from app.core.pipes.simple_index_pipeline import SimpleIndexChromaPipeline
-from app.core.config.schemas import RetrieverConfig
 from langchain_core.documents import Document
 import tempfile
 import os
@@ -27,7 +27,8 @@ async def add_documents(
     - Uses the current database configuration
     """
     try:
-        indexer = ChromaIndexer(collection_name)
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
         docs = [Document(**doc) for doc in documents]
         indexer.add_documents(docs)
         return {"message": f"{len(docs)} documents added to collection '{collection_name}'"}
@@ -46,8 +47,12 @@ async def search_documents(
         MMR parameters: fetch_k, lambda_mult.
         Similarity threshold parameters: score_threshold.""",
         example={
-            "search_type": "similarity",
+            "search_type": "mmr",
             "k": 4,
+            "search_parameters": {
+                "fetch_k": 20,
+                "lambda_mult": 0.5
+            }
         }
     )
 ):
@@ -59,8 +64,11 @@ async def search_documents(
     - Similarity threshold allows filtering by minimum score
     """
     try:
-        indexer = ChromaIndexer(collection_name)
-        results = indexer.similarity_search(query, retriever_config)
+        config = retriever_config or RetrieverConfig(collection_name=collection_name)
+        config.collection_name = collection_name  # Ensure collection name matches path
+        
+        indexer = ChromaIndexer(config)
+        results = indexer.similarity_search(query, config)
         return {"results": [doc.dict() for doc in results]}
     except Exception as e:
         logger.error(f"Error searching documents: {str(e)}")
@@ -70,7 +78,8 @@ async def search_documents(
 async def delete_document(collection_name: str, document_id: str):
     """Delete a document from the collection by ID."""
     try:
-        indexer = ChromaIndexer(collection_name)
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
         indexer.delete_document(document_id)
         return {"message": f"Document '{document_id}' deleted from collection '{collection_name}'"}
     except Exception as e:
@@ -85,7 +94,8 @@ async def update_document(
 ):
     """Update a document in the collection by ID."""
     try:
-        indexer = ChromaIndexer(collection_name)
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
         doc = Document(**document)
         indexer.update_document(document_id, doc)
         return {"message": f"Document '{document_id}' updated in collection '{collection_name}'"}
@@ -97,7 +107,8 @@ async def update_document(
 async def count_documents(collection_name: str):
     """Get the total number of documents in a collection."""
     try:
-        indexer = ChromaIndexer(collection_name)
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
         count = indexer.count_documents()
         return {"count": count}
     except Exception as e:
@@ -107,17 +118,42 @@ async def count_documents(collection_name: str):
 @router.post("/{collection_name}/process_pdfs", summary="Process and index PDF files")
 async def process_pdfs(
     collection_name: str,
-    files: List[UploadFile] = File(..., description="PDF files to process")
+    files: List[UploadFile] = File(..., description="PDF files to process"),
+    chunk_size: int = Query(
+        default=10000,
+        gt=0,
+        description="Size of document chunks. Larger values mean longer but fewer chunks"
+    ),
+    chunk_overlap: int = Query(
+        default=200,
+        ge=0,
+        lt=10000,
+        description="Number of characters to overlap between chunks. Helps maintain context between chunks"
+    )
 ):
     """
     Process PDF files and add their content to the collection.
     
     - Supports multiple PDF files
-    - Automatically chunks content into appropriate sizes
-    - Uses the current database configuration
+    - Customize chunk size and overlap for text splitting
+    - Automatically processes and indexes all content
+    
+    Example chunk sizes:
+    - 10000: Good for general purpose use
+    - 4000: Better for precise retrievals
+    - 2000: Best for very specific queries
+    
+    Example overlaps:
+    - 200: Standard overlap
+    - 500: More context preservation
+    - 1000: Maximum context preservation
     """
     try:
-        pipeline = SimpleIndexChromaPipeline(collection_name)
+        pipeline = SimpleIndexChromaPipeline(
+            collection_name=collection_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
         processed_docs = []
         
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -129,7 +165,11 @@ async def process_pdfs(
         
         return {
             "message": f"{len(processed_docs)} documents processed and added to collection '{collection_name}'",
-            "processed_files": [file.filename for file in files]
+            "processed_files": [file.filename for file in files],
+            "chunking_config": {
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap
+            }
         }
     except Exception as e:
         logger.error(f"Error processing PDFs: {str(e)}")
@@ -138,22 +178,51 @@ async def process_pdfs(
 @router.post("/{collection_name}/process_folder", summary="Process and index folder of PDFs")
 async def process_folder(
     collection_name: str,
-    folder_path: str = Body(..., embed=True, description="Path to folder containing PDF files")
+    folder_path: str = Body(..., embed=True, description="Path to folder containing PDF files"),
+    chunk_size: int = Query(
+        default=10000,
+        gt=0,
+        description="Size of document chunks. Larger values mean longer but fewer chunks"
+    ),
+    chunk_overlap: int = Query(
+        default=200,
+        ge=0,
+        lt=10000,
+        description="Number of characters to overlap between chunks. Helps maintain context between chunks"
+    )
 ):
     """
     Process all PDF files in a folder and add their content to the collection.
     
     - Processes all PDFs in the specified folder
-    - Automatically chunks content into appropriate sizes
-    - Uses the current database configuration
+    - Customize chunk size and overlap for text splitting
+    - Automatically processes and indexes all content
+    
+    Example chunk sizes:
+    - 10000: Good for general purpose use
+    - 4000: Better for precise retrievals
+    - 2000: Best for very specific queries
+    
+    Example overlaps:
+    - 200: Standard overlap
+    - 500: More context preservation
+    - 1000: Maximum context preservation
     """
     try:
-        pipeline = SimpleIndexChromaPipeline(collection_name)
+        pipeline = SimpleIndexChromaPipeline(
+            collection_name=collection_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
         processed_docs = pipeline.process_folder(folder_path)
         
         return {
             "message": f"{len(processed_docs)} documents processed and added to collection '{collection_name}'",
-            "folder_path": folder_path
+            "folder_path": folder_path,
+            "chunking_config": {
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap
+            }
         }
     except Exception as e:
         logger.error(f"Error processing folder: {str(e)}")

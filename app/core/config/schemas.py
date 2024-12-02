@@ -35,6 +35,7 @@ class DatabaseConfig(BaseModel):
     
 class RetrieverConfig(BaseModel):
     """Base configuration for Retrievers"""
+    collection_name: str = Field(..., description="Name of the collection to retrieve from")
     search_type: str = Field(
         default="similarity",
         description="Type of search (similarity, mmr, etc.)"
@@ -49,4 +50,7 @@ class AgentConfig(BaseModel):
     """Complete agent configuration"""
     llm: LLMConfig = Field(..., description="Language model configuration")
     retriever: RetrieverConfig = Field(..., description="Retriever configuration")
-    database: DatabaseConfig = Field(..., description="Vector store configuration")
+    agent_parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Agent-specific parameters (e.g., max_retrievals, max_generations for LangComplexRAG)"
+    )

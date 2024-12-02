@@ -28,9 +28,17 @@ rag_prompt = ChatPromptTemplate.from_messages(
 )
 
 #***#
+'''
 system_prompt = """
 You a question re-writer that converts an input question to a better version that is optimized for vectorstore retrieval.
 The vectorstore contains information about AI papers. Look at the input and try to reason about the underlying semantic intent / meaning.
+Additional feedback may be provided for why a previous version of the question didn't lead to a valid response. Make sure to utilize that feedback to generate a better question.
+Only respond with the rewritten question and nothing else! 
+"""
+'''
+
+system_prompt = """
+You a question re-writer that converts an input question to a better version that is optimized for vectorstore retrieval. Look at the input and try to reason about the underlying semantic intent / meaning.
 Additional feedback may be provided for why a previous version of the question didn't lead to a valid response. Make sure to utilize that feedback to generate a better question.
 Only respond with the rewritten question and nothing else! 
 """
@@ -191,9 +199,17 @@ knowledge_extraction_prompt = ChatPromptTemplate.from_messages(
 )
 
 #***#
+'''
 system_prompt = """
 You are an expert at routing a user question to a vectorstore, a websearch or a simple QA language model.
 The vectorstore contains documents related to AI papers.
+If you can answer the question without any additional context or if a websearch could not provide additional context, route it to the QA language model.
+If you need additional context and it is a question about AI papers, use the vectorstore, otherwise, use websearch.
+"""
+'''
+
+system_prompt = """
+You are an expert at routing a user question to a vectorstore, a websearch or a simple QA language model.
 If you can answer the question without any additional context or if a websearch could not provide additional context, route it to the QA language model.
 If you need additional context and it is a question about AI papers, use the vectorstore, otherwise, use websearch.
 """

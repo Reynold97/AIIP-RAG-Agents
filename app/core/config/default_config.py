@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Optional, Dict, Any, Literal
 from .schemas import (
     LLMConfig,
     EmbeddingConfig,
@@ -48,6 +48,7 @@ DEFAULT_DATABASE = DatabaseConfig(
 )
 
 DEFAULT_RETRIEVER = RetrieverConfig(
+    collection_name="default_collection",
     search_type="similarity",
     k=4,
     search_parameters={}
@@ -56,7 +57,7 @@ DEFAULT_RETRIEVER = RetrieverConfig(
 DEFAULT_AGENT_CONFIG = AgentConfig(
     llm=DEFAULT_LLM,
     retriever=DEFAULT_RETRIEVER,
-    database=DEFAULT_DATABASE
+    agent_parameters={}
 )
 
 def get_llm_config(model_name: str) -> LLMConfig:
@@ -73,30 +74,24 @@ def get_embedding_config(model_name: str) -> EmbeddingConfig:
 
 def create_agent_config(
     llm_name: str = "gpt-4o-mini",
-    embedding_name: str = "text-embedding-3-small",
     collection_name: str = "default_collection",
     search_type: str = "similarity",
-    k: int = 4
+    k: int = 4,
+    search_parameters: Optional[Dict[str, Any]] = None,
+    agent_parameters: Optional[Dict[str, Any]] = None
 ) -> AgentConfig:
     """Create an agent configuration with specified parameters"""
     llm_config = get_llm_config(llm_name)
-    embedding_config = get_embedding_config(embedding_name)
-    
-    database_config = DatabaseConfig(
-        database_type="ChromaDB",
-        collection_name=collection_name,
-        embedding=embedding_config,
-        parameters=DEFAULT_DATABASE.parameters
-    )
     
     retriever_config = RetrieverConfig(
+        collection_name=collection_name,
         search_type=search_type,
         k=k,
-        search_parameters=DEFAULT_RETRIEVER.search_parameters
+        search_parameters=search_parameters or {}
     )
     
     return AgentConfig(
         llm=llm_config,
         retriever=retriever_config,
-        database=database_config
+        agent_parameters=agent_parameters or {}
     )

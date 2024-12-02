@@ -5,7 +5,7 @@ from chromadb import PersistentClient
 from app.core.config.schemas import DatabaseConfig
 from langchain_core.documents import Document
 from app.core.config.schemas import DatabaseConfig, RetrieverConfig
-from app.core.config.default_config import DEFAULT_DATABASE
+from app.core.config.default_config import DEFAULT_DATABASE, DEFAULT_RETRIEVER
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
 import logging
@@ -114,10 +114,14 @@ class ChromaDB:
 chroma_db = ChromaDB()
 
 class ChromaIndexer:
-    def __init__(self, collection_name: str):
-        """Initialize ChromaIndexer with collection name"""
-        self.collection_name = collection_name
-        self.vectorstore = chroma_db.initialize_db(self.collection_name)
+    def __init__(self, config: Optional[RetrieverConfig] = None):
+        """Initialize ChromaIndexer with retriever configuration
+        
+        Args:
+            config: RetrieverConfig for search operations. If None, uses default config.
+        """
+        self.config = config or DEFAULT_RETRIEVER
+        self.vectorstore = chroma_db.initialize_db(self.config.collection_name)
     
     def add_documents(self, documents: List[Document]):
         """Add documents to the vectorstore"""
@@ -126,24 +130,32 @@ class ChromaIndexer:
     def similarity_search(
         self, 
         query: str,
-        retriever_config: Optional[RetrieverConfig] = None
+        config: Optional[RetrieverConfig] = None
     ):
-        """Perform similarity search with optional retriever configuration"""
-        if retriever_config is None:
-            return self.vectorstore.similarity_search(query, k=4)
+        """Perform similarity search with optional retriever configuration
+        
+        Args:
+            query: Search query string
+            config: Optional RetrieverConfig to override default settings
+        """
+        try:
+            search_config = config or self.config
             
-        if retriever_config.search_type == "mmr":
-            return self.vectorstore.max_marginal_relevance_search(
-                query,
-                k=retriever_config.k,
-                **retriever_config.search_parameters
-            )
-        else:  # default similarity search
-            return self.vectorstore.similarity_search(
-                query,
-                k=retriever_config.k,
-                **retriever_config.search_parameters
-            )
+            if search_config.search_type == "mmr":
+                return self.vectorstore.max_marginal_relevance_search(
+                    query,
+                    k=search_config.k,
+                    **search_config.search_parameters
+                )
+            else:  # default similarity search
+                return self.vectorstore.similarity_search(
+                    query,
+                    k=search_config.k,
+                    **search_config.search_parameters
+                )
+        except Exception as e:
+            logger.error(f"Error in similarity search: {str(e)}")
+            raise
     
     def update_document(self, document_id: str, document: Document):
         """Update a document in the vectorstore"""
@@ -153,21 +165,27 @@ class ChromaIndexer:
         """Delete a document from the vectorstore"""
         self.vectorstore.delete([document_id])
     
-    def as_retriever(self, retriever_config: Optional[RetrieverConfig] = None):
-        """Get retriever with optional configuration"""
-        if retriever_config is None:
-            search_kwargs = {"k": 4}
-            return self.vectorstore.as_retriever(search_kwargs=search_kwargs)
-            
-        search_kwargs = {
-            "k": retriever_config.k,
-            **retriever_config.search_parameters
-        }
+    def as_retriever(self, config: Optional[RetrieverConfig] = None):
+        """Get retriever with optional configuration
         
-        return self.vectorstore.as_retriever(
-            search_type=retriever_config.search_type,
-            search_kwargs=search_kwargs
-        )
+        Args:
+            config: Optional RetrieverConfig to override default settings
+        """
+        try:
+            search_config = config or self.config
+            
+            search_kwargs = {
+                "k": search_config.k,
+                **search_config.search_parameters
+            }
+            
+            return self.vectorstore.as_retriever(
+                search_type=search_config.search_type,
+                search_kwargs=search_kwargs
+            )
+        except Exception as e:
+            logger.error(f"Error creating retriever: {str(e)}")
+            raise
     
     def count_documents(self):
         """Count documents in the collection"""
