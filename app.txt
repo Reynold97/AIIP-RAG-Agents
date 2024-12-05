@@ -1,0 +1,2305 @@
+File Name: api\app.py
+========================================
+from fastapi import FastAPI
+from app.api.routers import download_router, chromadb_router, chromaindexer_router, chromaagent_router
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI()
+
+app.include_router(download_router.router)
+app.include_router(chromadb_router.router)
+app.include_router(chromaindexer_router.router)
+app.include_router(chromaagent_router.router)
+
+@app.get("/")
+def root():
+    return {"message": "Welcome to AIIP AI Agents"}
+========================================
+
+File Name: api\__init__.py
+========================================
+
+========================================
+
+File Name: api\routers\chromaagent_router.py
+========================================
+from fastapi import APIRouter, HTTPException, Body, Query
+from fastapi.responses import StreamingResponse
+from app.core.agents.langgraph.simple_agent.agent import LangSimpleRAG
+from app.core.agents.langgraph.complex_agent.agent import LangComplexRAG
+from app.core.config.schemas import AgentConfig
+from app.core.config.default_config import DEFAULT_AGENT_CONFIG
+from typing import Optional
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/agent", tags=["Agents"])
+
+@router.post(
+    "/simple",
+    summary="Query the simple RAG agent",
+    description="""
+    Sends a question to the simple RAG agent.
+    
+    - Can return a single response or stream updates
+    - Can be configured with custom agent parameters
+    - Returns retrieved documents and generated answer
+    """,
+    response_description="The agent's answer or a stream of updates"
+)
+async def simple_rag_agent(
+    question: str = Query(..., description="The question to ask the agent"),
+    stream: bool = Query(
+        default=False, 
+        description="Whether to stream the response or return a single answer"
+    ),
+    config: Optional[AgentConfig] = Body(
+        default=None,
+        description="Optional agent configuration. If not provided, uses default settings.",
+        example={
+            "llm": {
+                "name": "gpt-4o-mini",
+                "type": "openai",
+                "parameters": {
+                    "temperature": 0.7
+                }
+            },
+            "retriever": {
+                "collection_name": "default_collection",
+                "search_type": "similarity",
+                "k": 4,
+                "search_parameters": {}
+            },
+            "agent_parameters": {}
+        }
+    )
+):
+    """Query the simple RAG agent with optional streaming and configuration"""
+    try:
+        # Initialize agent
+        agent = LangSimpleRAG(config)
+        
+        if stream:
+            def event_generator():
+                try:
+                    for output in agent.stream(question):
+                        if isinstance(output, dict) and "error" in output:
+                            yield f"data: {json.dumps({'error': output['error']})}\n\n"
+                            break
+                        yield f"data: {json.dumps(output)}\n\n"
+                except Exception as e:
+                    logger.error(f"Error in stream generation: {str(e)}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream"
+            )
+        else:
+            result = agent.run(question)
+            if isinstance(result, str) and result.startswith("Error:"):
+                raise HTTPException(status_code=500, detail=result)
+            return {"answer": result}
+            
+    except Exception as e:
+        logger.error(f"Error in simple RAG agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post(
+    "/complex",
+    summary="Query the complex RAG agent",
+    description="""
+    Sends a question to the complex RAG agent.
+    
+    - Can return a single response or stream updates
+    - Can be configured with custom agent parameters
+    - Supports multiple retrieval strategies and self-correction
+    - Returns retrieved documents, feedback, and generated answer
+    """,
+    response_description="The agent's answer or a stream of updates"
+)
+async def complex_rag_agent(
+    question: str = Query(..., description="The question to ask the agent"),
+    stream: bool = Query(
+        default=False, 
+        description="Whether to stream the response or return a single answer"
+    ),
+    config: Optional[AgentConfig] = Body(
+        default=None,
+        description="Optional agent configuration. If not provided, uses default settings.",
+        example={
+            "llm": {
+                "name": "gpt-4o-mini",
+                "type": "openai",
+                "parameters": {
+                    "temperature": 0.7
+                }
+            },
+            "retriever": {
+                "collection_name": "default_collection",
+                "search_type": "similarity",
+                "k": 4,
+                "search_parameters": {}
+            },
+            "agent_parameters": {
+                "max_retrievals": 3,
+                "max_generations": 3
+            }
+        }
+    )
+):
+    """Query the complex RAG agent with optional streaming and configuration"""
+    try:
+        # Initialize agent
+        agent = LangComplexRAG(config)
+        
+        if stream:
+            def event_generator():
+                try:
+                    for output in agent.stream(question):
+                        if isinstance(output, dict) and "error" in output:
+                            yield f"data: {json.dumps({'error': output['error']})}\n\n"
+                            break
+                        yield f"data: {json.dumps(output)}\n\n"
+                except Exception as e:
+                    logger.error(f"Error in stream generation: {str(e)}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream"
+            )
+        else:
+            result = agent.run(question)
+            if isinstance(result, str) and result.startswith("Error:"):
+                raise HTTPException(status_code=500, detail=result)
+            return {"answer": result}
+            
+    except Exception as e:
+        logger.error(f"Error in complex RAG agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+========================================
+
+File Name: api\routers\chromadb_router.py
+========================================
+from fastapi import APIRouter, HTTPException, Body
+from typing import Optional
+from app.core.config.schemas import DatabaseConfig
+from app.core.config.default_config import AVAILABLE_EMBEDDINGS, DEFAULT_DATABASE
+from app.core.indexers.chroma_indexer import chroma_db
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/chromadb", tags=["Database Operations"])
+
+@router.post("/create", summary="Initialize or reconfigure ChromaDB")
+async def create_database(
+    config: Optional[DatabaseConfig] = Body(
+        default=None,
+        description="Database configuration. If not provided, default settings will be used.",
+        example={
+            "database_type": "ChromaDB",
+            "collection_name": "default_collection",
+            "embedding": {
+                "name": "text-embedding-3-small",  # Changed from model_name
+                "type": "openai",                  # Changed from model_type
+                "parameters": {}
+            },
+            "parameters": {
+                "collection_metadata": {"hnsw:space": "cosine"}
+            }
+        }
+    )
+):
+    """
+    Initialize or reconfigure ChromaDB with optional configuration.
+    
+    - If no config is provided, uses default settings
+    - The persist_directory is fixed to './app/databases/chroma_db'
+    - Supports different embedding models and collection metadata
+    - This will affect all subsequent database operations
+    """
+    try:
+        if config:
+            # Ensure persist_directory is fixed
+            config.parameters["persist_directory"] = DEFAULT_DATABASE.parameters["persist_directory"]
+            # Reconfigure the global instance
+            chroma_db.reconfigure(config)
+        
+        return {"message": "Database configured successfully", "config": config or DEFAULT_DATABASE}
+    except Exception as e:
+        logger.error(f"Error configuring database: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/collections/{collection_name}", summary="Create a new collection")
+async def create_collection(collection_name: str):
+    """Create a new collection using the current database configuration."""
+    try:
+        chroma_db.create_collection(collection_name)
+        return {"message": f"Collection '{collection_name}' created successfully"}
+    except Exception as e:
+        logger.error(f"Error creating collection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/collections", summary="List all collections")
+async def list_collections():
+    """List all available collections in the database."""
+    try:
+        collections = chroma_db.list_collections()
+        return {"collections": collections}
+    except Exception as e:
+        logger.error(f"Error listing collections: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/collections/{collection_name}", summary="Delete a collection")
+async def delete_collection(collection_name: str):
+    """Delete a collection by name."""
+    try:
+        chroma_db.delete_collection(collection_name)
+        return {"message": f"Collection '{collection_name}' deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting collection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/embeddings", summary="List available embedding models")
+async def list_embeddings():
+    """Get a list of all available embedding models and their configurations."""
+    return {"embeddings": AVAILABLE_EMBEDDINGS}
+========================================
+
+File Name: api\routers\chromaindexer_router.py
+========================================
+from fastapi import APIRouter, HTTPException, Body, File, UploadFile, Query
+from pydantic import BaseModel
+from typing import List, Optional
+from app.core.config.schemas import RetrieverConfig
+from app.core.indexers.chroma_indexer import ChromaIndexer
+from app.core.pipes.simple_index_pipeline import SimpleIndexChromaPipeline
+from langchain_core.documents import Document
+import tempfile
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/chroma", tags=["Index Operations"])
+
+@router.post("/{collection_name}/add_documents", summary="Add documents to collection")
+async def add_documents(
+    collection_name: str,
+    documents: List[dict] = Body(
+        ..., 
+        description="List of documents with page_content and metadata"
+    )
+):
+    """
+    Add documents to a collection.
+    
+    - Documents should include page_content and optional metadata
+    - Uses the current database configuration
+    """
+    try:
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
+        docs = [Document(**doc) for doc in documents]
+        indexer.add_documents(docs)
+        return {"message": f"{len(docs)} documents added to collection '{collection_name}'"}
+    except Exception as e:
+        logger.error(f"Error adding documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_name}/search", summary="Search documents in collection")
+async def search_documents(
+    collection_name: str,
+    query: str = Body(..., embed=True, description="Search query"),
+    retriever_config: Optional[RetrieverConfig] = Body(
+        default=None,
+        description="""Optional retriever configuration.
+        Available search types: similarity, mmr, similarity_score_threshold.
+        MMR parameters: fetch_k, lambda_mult.
+        Similarity threshold parameters: score_threshold.""",
+        example={
+            "search_type": "similarity",
+            "k": 4,
+            "search_parameters": {}
+        }
+    )
+):
+    """
+    Search documents in a collection.
+    
+    - Supports different search types: similarity, mmr, similarity_score_threshold
+    - MMR (Maximal Marginal Relevance) helps with result diversity
+    - Similarity threshold allows filtering by minimum score
+    """
+    try:
+        config = retriever_config or RetrieverConfig(collection_name=collection_name)
+        config.collection_name = collection_name  # Ensure collection name matches path
+        
+        indexer = ChromaIndexer(config)
+        results = indexer.similarity_search(query, config)
+        return {"results": [doc.dict() for doc in results]}
+    except Exception as e:
+        logger.error(f"Error searching documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{collection_name}/documents/{document_id}", summary="Delete a document")
+async def delete_document(collection_name: str, document_id: str):
+    """Delete a document from the collection by ID."""
+    try:
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
+        indexer.delete_document(document_id)
+        return {"message": f"Document '{document_id}' deleted from collection '{collection_name}'"}
+    except Exception as e:
+        logger.error(f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/{collection_name}/documents/{document_id}", summary="Update a document")
+async def update_document(
+    collection_name: str,
+    document_id: str,
+    document: dict = Body(..., description="Document with page_content and metadata")
+):
+    """Update a document in the collection by ID."""
+    try:
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
+        doc = Document(**document)
+        indexer.update_document(document_id, doc)
+        return {"message": f"Document '{document_id}' updated in collection '{collection_name}'"}
+    except Exception as e:
+        logger.error(f"Error updating document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{collection_name}/count", summary="Count documents in collection")
+async def count_documents(collection_name: str):
+    """Get the total number of documents in a collection."""
+    try:
+        config = RetrieverConfig(collection_name=collection_name)
+        indexer = ChromaIndexer(config)
+        count = indexer.count_documents()
+        return {"count": count}
+    except Exception as e:
+        logger.error(f"Error counting documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_name}/process_pdfs", summary="Process and index PDF files")
+async def process_pdfs(
+    collection_name: str,
+    files: List[UploadFile] = File(..., description="PDF files to process"),
+    chunk_size: int = Query(
+        default=10000,
+        gt=0,
+        description="Size of document chunks. Larger values mean longer but fewer chunks"
+    ),
+    chunk_overlap: int = Query(
+        default=200,
+        ge=0,
+        lt=10000,
+        description="Number of characters to overlap between chunks. Helps maintain context between chunks"
+    )
+):
+    """
+    Process PDF files and add their content to the collection.
+    
+    - Supports multiple PDF files
+    - Customize chunk size and overlap for text splitting
+    - Automatically processes and indexes all content
+    
+    Example chunk sizes:
+    - 10000: Good for general purpose use
+    - 4000: Better for precise retrievals
+    - 2000: Best for very specific queries
+    
+    Example overlaps:
+    - 200: Standard overlap
+    - 500: More context preservation
+    - 1000: Maximum context preservation
+    """
+    try:
+        pipeline = SimpleIndexChromaPipeline(
+            collection_name=collection_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+        processed_docs = []
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for file in files:
+                temp_file_path = os.path.join(temp_dir, file.filename)
+                with open(temp_file_path, "wb") as buffer:
+                    buffer.write(await file.read())
+                processed_docs.extend(pipeline.process_pdf(temp_file_path))
+        
+        return {
+            "message": f"{len(processed_docs)} documents processed and added to collection '{collection_name}'",
+            "processed_files": [file.filename for file in files],
+            "chunking_config": {
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error processing PDFs: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_name}/process_folder", summary="Process and index folder of PDFs")
+async def process_folder(
+    collection_name: str,
+    folder_path: str = Body(..., embed=True, description="Path to folder containing PDF files"),
+    chunk_size: int = Query(
+        default=10000,
+        gt=0,
+        description="Size of document chunks. Larger values mean longer but fewer chunks"
+    ),
+    chunk_overlap: int = Query(
+        default=200,
+        ge=0,
+        lt=10000,
+        description="Number of characters to overlap between chunks. Helps maintain context between chunks"
+    )
+):
+    """
+    Process all PDF files in a folder and add their content to the collection.
+    
+    - Processes all PDFs in the specified folder
+    - Customize chunk size and overlap for text splitting
+    - Automatically processes and indexes all content
+    
+    Example chunk sizes:
+    - 10000: Good for general purpose use
+    - 4000: Better for precise retrievals
+    - 2000: Best for very specific queries
+    
+    Example overlaps:
+    - 200: Standard overlap
+    - 500: More context preservation
+    - 1000: Maximum context preservation
+    """
+    try:
+        pipeline = SimpleIndexChromaPipeline(
+            collection_name=collection_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+        processed_docs = pipeline.process_folder(folder_path)
+        
+        return {
+            "message": f"{len(processed_docs)} documents processed and added to collection '{collection_name}'",
+            "folder_path": folder_path,
+            "chunking_config": {
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error processing folder: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+========================================
+
+File Name: api\routers\download_router.py
+========================================
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import RedirectResponse
+from app.core.loaders.gdrive_loader import GDriveLoader
+
+router = APIRouter(prefix="/gdrive", tags=["Google Drive"])
+
+gdrive_loader = GDriveLoader()
+
+@router.get("/authorize")
+async def authorize():
+    authorization_url, _ = gdrive_loader.authenticate()
+    return RedirectResponse(url=authorization_url)
+
+@router.get("/oauth2callback")
+async def oauth2callback(request: Request):
+    try:
+        state = request.query_params.get('state')
+        authorization_response = str(request.url)
+        gdrive_loader.set_credentials(authorization_response, state)
+        # Redirect to the Streamlit UI with a success parameter
+        return RedirectResponse(url="http://localhost:8501/Chroma_Index_Operations?auth_success=true")
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+@router.get("/download_files/{folder_id}")
+async def download_files(folder_id: str):
+    try:
+        downloaded_files = gdrive_loader.download_files(folder_id)
+        if not downloaded_files:
+            raise HTTPException(status_code=404, detail=f"No files found in folder ID: {folder_id}")
+        return {"message": f"Files downloaded successfully!", "files": downloaded_files}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+========================================
+
+File Name: api\routers\__init__.py
+========================================
+
+========================================
+
+File Name: core\__init__.py
+========================================
+
+========================================
+
+File Name: core\agents\__init__.py
+========================================
+
+========================================
+
+File Name: core\agents\langgraph\__init__.py
+========================================
+
+========================================
+
+File Name: core\agents\langgraph\complex_agent\agent.py
+========================================
+from typing import Optional, List, Dict, Any
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph, START, END
+from app.core.indexers.chroma_indexer import ChromaIndexer
+from app.core.config.schemas import AgentConfig
+from app.core.config.default_config import DEFAULT_AGENT_CONFIG
+from langchain_core.output_parsers import StrOutputParser
+from .state import GraphState
+from .tools import web_search_tool
+import logging
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+class LangComplexRAG:
+    """LangChain Graph-based Complex RAG Agent with multiple feedback loops"""
+    
+    def __init__(self, config: Optional[AgentConfig] = None):
+        """Initialize the agent with optional configuration"""
+        self.config = config or DEFAULT_AGENT_CONFIG
+        
+        # Get agent-specific parameters with defaults
+        self.MAX_RETRIEVALS = self.config.agent_parameters.get("max_retrievals", 3)
+        self.MAX_GENERATIONS = self.config.agent_parameters.get("max_generations", 3)
+        
+        logger.info(f"Initializing LangComplexRAG with max_retrievals={self.MAX_RETRIEVALS}, "
+                   f"max_generations={self.MAX_GENERATIONS}")
+        
+        # Initialize all components
+        self._initialize_components()
+        self._initialize_output_parsers()
+        self._initialize_chains()
+        self._initialize_nodes()
+        self.pipeline = self._build_pipeline()
+    
+    def run(self, question: str) -> str:
+        """Run the agent synchronously"""
+        try:
+            inputs = {"question": question}
+            result = self.pipeline.invoke(inputs)
+            return result["generation"]
+        except Exception as e:
+            logger.error(f"Error running agent: {str(e)}")
+            raise
+
+    def stream(self, question: str):
+        """Stream the agent's response"""
+        try:
+            inputs = {"question": question}
+            for output in self.pipeline.stream(inputs, stream_mode='updates'):
+                yield output
+        except Exception as e:
+            logger.error(f"Error streaming response: {str(e)}")
+            raise
+        
+    def _initialize_components(self):
+        """Initialize base components: LLM and Retriever"""
+        try:
+            # Initialize LLM
+            self.llm_engine = ChatOpenAI(
+                model=self.config.llm.name,
+                **self.config.llm.parameters
+            )
+            
+            # Initialize Retriever
+            self.indexer = ChromaIndexer(self.config.retriever)
+            self.retriever = self.indexer.as_retriever()
+            
+            logger.info("Components initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing components: {str(e)}")
+            raise
+            
+    def _initialize_output_parsers(self):
+        """Initialize Pydantic output parsers for structured outputs"""
+        try:
+            from .utils import (
+                GradeHallucinations,
+                GradeDocuments,
+                GradeAnswer,
+                RouteQuery
+            )
+            
+            # Store parser classes
+            self.parsers = {
+                "hallucination": GradeHallucinations,
+                "documents": GradeDocuments,
+                "answer": GradeAnswer,
+                "route": RouteQuery
+            }
+            
+            logger.info("Output parsers initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing output parsers: {str(e)}")
+            raise
+    
+    def _initialize_chains(self):
+        """Initialize all LangChain chains"""
+        try:
+            from .prompts import (
+                rag_prompt,
+                db_query_rewrite_prompt,
+                hallucination_prompt,
+                answer_prompt,
+                query_feedback_prompt,
+                generation_feedback_prompt,
+                give_up_prompt,
+                grade_doc_prompt,
+                knowledge_extraction_prompt,
+                router_prompt,
+                websearch_query_rewrite_prompt,
+                simple_question_prompt
+            )
+            
+            # Basic chains
+            self.rag_chain = rag_prompt | self.llm_engine | StrOutputParser()
+            self.db_query_rewriter = db_query_rewrite_prompt | self.llm_engine | StrOutputParser()
+            self.query_feedback_chain = query_feedback_prompt | self.llm_engine | StrOutputParser()
+            self.generation_feedback_chain = generation_feedback_prompt | self.llm_engine | StrOutputParser()
+            self.give_up_chain = give_up_prompt | self.llm_engine | StrOutputParser()
+            self.knowledge_extractor = knowledge_extraction_prompt | self.llm_engine | StrOutputParser()
+            self.websearch_query_rewriter = websearch_query_rewrite_prompt | self.llm_engine | StrOutputParser()
+            self.simple_question_chain = simple_question_prompt | self.llm_engine | StrOutputParser()
+            
+            # Structured output chains
+            self.hallucination_grader = hallucination_prompt | self.llm_engine.with_structured_output(self.parsers["hallucination"])
+            self.answer_grader = answer_prompt | self.llm_engine.with_structured_output(self.parsers["answer"])
+            self.retrieval_grader = grade_doc_prompt | self.llm_engine.with_structured_output(self.parsers["documents"])
+            self.question_router = router_prompt | self.llm_engine.with_structured_output(self.parsers["route"])
+            
+            logger.info("Chains initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing chains: {str(e)}")
+            raise
+    
+    def _initialize_nodes(self):
+        """Initialize all nodes with exact same logic as original"""
+        try:
+            def retriever_node(state: GraphState):
+                new_documents = self.retriever.invoke(state.rewritten_question)
+                new_documents = [d.page_content for d in new_documents]
+                state.documents.extend(new_documents)
+                return {
+                    "documents": state.documents, 
+                    "retrieval_num": state.retrieval_num + 1
+                }
+
+            def generation_node(state: GraphState):
+                generation = self.rag_chain.invoke({
+                    "context": "\n\n".join(state.documents), 
+                    "question": state.question, 
+                    "feedback": "\n".join(state.generation_feedbacks)
+                })
+                return {
+                    "generation": generation,
+                    "generation_num": state.generation_num + 1
+                }
+
+            def db_query_rewriting_node(state: GraphState):
+                rewritten_question = self.db_query_rewriter.invoke({
+                    "question": state.question,
+                    "feedback": "\n".join(state.query_feedbacks)
+                })
+                return {"rewritten_question": rewritten_question, "search_mode": "vectorstore"} 
+
+            def answer_evaluation_node(state: GraphState):
+                # assess hallucination
+                hallucination_grade = self.hallucination_grader.invoke(
+                    {"documents": state.documents, "generation": state.generation}
+                )
+                if hallucination_grade.binary_score == "yes":
+                    # if no hallucination, assess relevance
+                    answer_grade = self.answer_grader.invoke({
+                        "question": state.question, 
+                        "generation": state.generation
+                    })
+                    if answer_grade.binary_score == "yes":
+                        # no hallucination and relevant
+                        return "useful"
+                    elif state.generation_num > self.MAX_GENERATIONS:
+                        return "max_generation_reached"
+                    else:
+                        # no hallucination but not relevant
+                        return "not relevant"
+                elif state.generation_num > self.MAX_GENERATIONS:
+                    return "max_generation_reached"
+                else:
+                    # we have hallucination
+                    return "hallucination" 
+                
+            def generation_feedback_node(state: GraphState):
+                feedback = self.generation_feedback_chain.invoke({
+                    "question": state.question,
+                    "documents": "\n\n".join(state.documents),
+                    "generation": state.generation
+                })
+
+                feedback = 'Feedback about the answer "{}": {}'.format(
+                    state.generation, feedback
+                )
+                state.generation_feedbacks.append(feedback)
+                return {"generation_feedbacks": state.generation_feedbacks}
+
+            def query_feedback_node(state: GraphState):
+                feedback = self.query_feedback_chain.invoke({
+                    "question": state.question,
+                    "rewritten_question": state.rewritten_question,
+                    "documents": "\n\n".join(state.documents),
+                    "generation": state.generation
+                })
+
+                feedback = 'Feedback about the query "{}": {}'.format(
+                    state.rewritten_question, feedback
+                )
+                state.query_feedbacks.append(feedback)
+                return {"query_feedbacks": state.query_feedbacks}
+
+            def give_up_node(state: GraphState):
+                response = self.give_up_chain.invoke(state.question)
+                return {"generation": response}
+
+            def filter_relevant_documents_node(state: GraphState):
+                # first, we grade every documents
+                grades = self.retrieval_grader.batch([
+                    {"question": state.question, "document": doc} 
+                    for doc in state.documents
+                ])
+                # Then we keep only the documents that were graded as relevant
+                filtered_docs = [
+                    doc for grade, doc 
+                    in zip(grades, state.documents) 
+                    if grade.binary_score == 'yes'
+                ]
+
+                # If we didn't get any relevant document, let's capture that 
+                # as a feedback for the next retrieval iteration
+                if not filtered_docs:
+                    feedback = 'Feedback about the query "{}": did not generate any relevant documents.'.format(
+                        state.rewritten_question
+                    )
+                    state.query_feedbacks.append(feedback)
+
+                return {
+                    "documents": filtered_docs, 
+                    "query_feedbacks": state.query_feedbacks
+                }
+
+            def knowledge_extractor_node(state: GraphState):
+                filtered_docs = self.knowledge_extractor.batch([
+                    {"question": state.question, "document": doc} 
+                    for doc in state.documents
+                ])
+                # we keep only the non empty documents
+                filtered_docs = [doc for doc in filtered_docs if doc]
+                return {"documents": filtered_docs}
+
+            def router_node(state: GraphState):
+                route_query = self.question_router.invoke(state.question)
+                return route_query.route
+
+            def simple_question_node(state: GraphState):
+                answer = self.simple_question_chain.invoke(state.question)
+                return {"generation": answer, "search_mode": "QA_LM"}
+
+            def websearch_query_rewriting_node(state: GraphState):
+                rewritten_question = self.websearch_query_rewriter.invoke({
+                    "question": state.question, 
+                    "feedback": "\n".join(state.query_feedbacks)
+                })
+                if state.search_mode != "websearch":
+                    state.retrieval_num = 0    
+                return {
+                    "rewritten_question": rewritten_question, 
+                    "search_mode": "websearch",
+                    "retrieval_num": state.retrieval_num
+                }
+
+            def web_search_node(state: GraphState):
+                try:
+                    new_docs = web_search_tool.invoke(
+                        {"query": state.rewritten_question}
+                    )
+                    
+                    if isinstance(new_docs, str):
+                        web_results = [new_docs]
+                    elif isinstance(new_docs, list):
+                        web_results = [d.get("content", str(d)) if isinstance(d, dict) else str(d) for d in new_docs]
+                    else:
+                        web_results = [str(new_docs)]
+                    
+                    state.documents.extend(web_results)
+                    return {
+                        "documents": state.documents, 
+                        "retrieval_num": state.retrieval_num + 1
+                    }
+                except Exception as e:
+                    return {
+                        "error": f"Web search failed: {str(e)}",
+                        "retrieval_num": state.retrieval_num + 1
+                    }
+
+            def search_mode_node(state: GraphState):
+                return state.search_mode
+
+            def relevant_documents_validation_node(state: GraphState):
+                if state.documents:
+                    # we have relevant documents
+                    return "knowledge_extraction"
+                elif state.search_mode == 'vectorsearch' and state.retrieval_num > self.MAX_RETRIEVALS:
+                    # we don't have relevant documents
+                    # and we reached the maximum number of retrievals
+                    return "max_db_search"
+                elif state.search_mode == 'websearch' and state.retrieval_num > self.MAX_RETRIEVALS:
+                    # we don't have relevant documents
+                    # and we reached the maximum number of websearches
+                    return "max_websearch"
+                else:
+                    # we don't have relevant documents
+                    # so we retry the search
+                    return state.search_mode
+
+            self.nodes = {
+                "retriever_node": retriever_node,
+                "generation_node": generation_node,
+                "db_query_rewriting_node": db_query_rewriting_node,
+                "generation_feedback": generation_feedback_node,
+                "generation_feedback_node": query_feedback_node,
+                "give_up_node": give_up_node,
+                "filter_relevant_documents_node": filter_relevant_documents_node,
+                "knowledge_extractor_node": knowledge_extractor_node,
+                "simple_question_node": simple_question_node,
+                "websearch_query_rewriting_node": websearch_query_rewriting_node,
+                "web_search_node": web_search_node,
+                "router_node": router_node,
+                "search_mode_node": search_mode_node,
+                "answer_evaluation_node": answer_evaluation_node,
+                "relevant_documents_validation_node": relevant_documents_validation_node
+            }
+            
+            logger.info("Nodes initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing nodes: {str(e)}")
+            raise
+    
+    def _build_pipeline(self) -> StateGraph:
+        """Build the LangGraph pipeline"""
+        try:
+            # Create graph
+            graph = StateGraph(GraphState)
+            
+            # Add nodes
+            graph.add_node('db_query_rewrite_node', self.nodes['db_query_rewriting_node'])
+            graph.add_node('retrieval_node', self.nodes['retriever_node'])
+            graph.add_node('generator_node', self.nodes['generation_node'])
+            graph.add_node('query_feedback_node', self.nodes['generation_feedback_node'])  # Note the name change here
+            graph.add_node('generation_feedback_node', self.nodes['generation_feedback'])  # And here
+            graph.add_node('simple_question_node', self.nodes['simple_question_node'])
+            graph.add_node('websearch_query_rewriting_node', self.nodes['websearch_query_rewriting_node'])
+            graph.add_node('web_search_node', self.nodes['web_search_node'])
+            graph.add_node('give_up_node', self.nodes['give_up_node'])
+            graph.add_node('filter_docs_node', self.nodes['filter_relevant_documents_node'])
+            graph.add_node('extract_knowledge_node', self.nodes['knowledge_extractor_node'])
+
+            # Add conditional edges from START
+            graph.add_conditional_edges(
+                START,
+                self.nodes['router_node'],
+                {
+                    "vectorstore": 'db_query_rewrite_node',
+                    "websearch": 'websearch_query_rewriting_node',
+                    "QA_LM": 'simple_question_node'
+                }
+            )
+
+            # Add simple edges
+            graph.add_edge('db_query_rewrite_node', 'retrieval_node')
+            graph.add_edge('retrieval_node', 'filter_docs_node')
+            graph.add_edge('extract_knowledge_node', 'generator_node')
+            graph.add_edge('websearch_query_rewriting_node', 'web_search_node')
+            graph.add_edge('web_search_node', 'filter_docs_node')
+            graph.add_edge('generation_feedback_node', 'generator_node')
+            graph.add_edge('simple_question_node', END)
+            graph.add_edge('give_up_node', END)
+
+            # Add conditional edges for answer evaluation
+            graph.add_conditional_edges(
+                'generator_node',
+                self.nodes['answer_evaluation_node'],
+                {
+                    "useful": END,
+                    "not relevant": 'query_feedback_node',
+                    "hallucination": 'generation_feedback_node',
+                    "max_generation_reached": 'give_up_node'
+                }
+            )
+
+            # Add conditional edges for search mode
+            graph.add_conditional_edges(
+                'query_feedback_node',
+                self.nodes['search_mode_node'],
+                {
+                    "vectorstore": 'db_query_rewrite_node',
+                    "websearch": 'websearch_query_rewriting_node',
+                }
+            )
+
+            # Add conditional edges for document validation
+            graph.add_conditional_edges(
+                'filter_docs_node',
+                self.nodes['relevant_documents_validation_node'],
+                {
+                    "knowledge_extraction": 'extract_knowledge_node',
+                    "websearch": 'websearch_query_rewriting_node',
+                    "vectorstore": 'db_query_rewrite_node',
+                    "max_db_search": 'websearch_query_rewriting_node',
+                    "max_websearch": 'give_up_node'
+                }
+            )
+
+            logger.info("Pipeline built successfully")
+            return graph.compile()
+
+        except Exception as e:
+            logger.error(f"Error building pipeline: {str(e)}")
+            raise
+========================================
+
+File Name: core\agents\langgraph\complex_agent\prompts.py
+========================================
+from langchain_core.prompts import ChatPromptTemplate
+
+
+system_prompt = """
+You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. 
+If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
+Additional feedback may be provided about a previous version of the answer. Make sure to utilize that feedback to improve the answer.
+Only provide the answer and nothing else!
+"""
+
+human_prompt = """
+Question: {question}
+
+Context: 
+{context}
+
+Here is the feedback about previous versions of the answer:
+{feedback}
+
+Answer:
+"""
+
+rag_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+#***#
+'''
+system_prompt = """
+You a question re-writer that converts an input question to a better version that is optimized for vectorstore retrieval.
+The vectorstore contains information about AI papers. Look at the input and try to reason about the underlying semantic intent / meaning.
+Additional feedback may be provided for why a previous version of the question didn't lead to a valid response. Make sure to utilize that feedback to generate a better question.
+Only respond with the rewritten question and nothing else! 
+"""
+'''
+
+system_prompt = """
+You a question re-writer that converts an input question to a better version that is optimized for vectorstore retrieval. Look at the input and try to reason about the underlying semantic intent / meaning.
+Additional feedback may be provided for why a previous version of the question didn't lead to a valid response. Make sure to utilize that feedback to generate a better question.
+Only respond with the rewritten question and nothing else! 
+"""
+
+human_prompt = """
+Here is the initial question: {question}
+
+Here is the feedback about previous versions of the question:
+{feedback}
+
+Formulate an improved question.
+Rewritten question:
+"""
+
+db_query_rewrite_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+system_prompt = """
+You are a grader assessing whether an LLM generation is grounded in / supported by a set of retrieved facts.
+Give a binary score 'yes' or 'no'. 'yes' means that the answer is grounded in / supported by the set of facts.
+"""
+
+human_prompt = """
+Set of facts:
+
+{documents}
+
+LLM generation: {generation}
+"""
+
+hallucination_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+) 
+
+system_prompt = """
+You are a grader assessing whether an answer addresses / resolves a question.
+Give a binary score 'yes' or 'no'. 'yes' means that the answer resolves the question.
+"""
+
+human_prompt = """
+User question: {question} 
+
+LLM generation: {generation}
+"""
+
+
+answer_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+system_prompt = """
+Your role is to give feedback on a the LLM generated answer. The LLM generation is NOT grounded in the set of retrieved facts.
+Explain how the generated answer could be improved so that it is only solely grounded in the retrieved facts.  
+Only provide your feedback and nothing else!
+"""
+
+human_prompt = """
+User question: {question}
+
+Retrieved facts: 
+{documents}
+
+Wrong generated answer: {generation}
+"""
+
+generation_feedback_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+system_prompt = """
+Your role is to give feedback on a the text query used to retrieve documents. Those retrieved documents are used as context to answer a user question.
+The following generated answer doesn't address the question! Explain how the query could be improved so that the retrieved documents could be more relevant to the question. 
+Only provide your feedback and nothing else!
+"""
+
+human_prompt = """
+User question: {question}
+
+Text query: {rewritten_question}
+
+Retrieved documents: 
+{documents}
+
+Wrong generated answer: {generation}
+"""
+
+query_feedback_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+system_prompt = """
+You job is to generate an apology for not being able to provide a correct answer to a user question.
+The question were used to retrieve documents from a database and a websearch and none of them were able to provide enough context to answer the user question.
+Explain to the user that you couldn't answer the question.
+"""
+
+give_up_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", "User question: {question} \n\n Answer:"),
+    ]
+)
+
+system_prompt = """
+You are a grader assessing relevance of a retrieved document to a user question. 
+It does not need to be a stringent test. The goal is to filter out erroneous retrievals.
+If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant.
+Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question. 'yes' means that the document contains relevant information.
+"""
+
+human_prompt = """
+Retrieved document: {document}
+
+User question: {question}
+"""
+
+grade_doc_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+system_prompt = """
+You are a knowledge refinement engine. Your job is to extract the information from a document that could be relevant to a user question. 
+The goal is to filter out the noise and keep only the information that can provide context to answer the user question.
+If the document contains keyword(s) or semantic meaning related to the user question, consider it as relevant.
+DO NOT modify the text, only return the original text that is relevant to the user question. 
+"""
+
+human_prompt = """
+Retrieved document: {document}
+
+User question: {question}
+"""
+
+knowledge_extraction_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+#***#
+'''
+system_prompt = """
+You are an expert at routing a user question to a vectorstore, a websearch or a simple QA language model.
+The vectorstore contains documents related to AI papers.
+If you can answer the question without any additional context or if a websearch could not provide additional context, route it to the QA language model.
+If you need additional context and it is a question about AI papers, use the vectorstore, otherwise, use websearch.
+"""
+'''
+
+system_prompt = """
+You are an expert at routing a user question to a vectorstore, a websearch or a simple QA language model.
+If you can answer the question without any additional context or if a websearch could not provide additional context, route it to the QA language model.
+If you need additional context and it is a question about AI papers, use the vectorstore, otherwise, use websearch.
+"""
+
+router_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", "{question}"),
+    ]
+)
+
+system_prompt = """
+You are a question re-writer that converts an input question to a better version that is optimized for web search. 
+Look at the input and try to reason about the underlying semantic intent / meaning.
+Additional feedback may be provided for why a previous version of the question didn't lead to a valid response. Make sure to utilize that feedback to generate a better question.
+Only respond with the rewritten question and nothing else! 
+"""
+
+human_prompt = """
+Here is the initial question: {question}
+
+Here is the feedback about previous versions of the question:
+{feedback}
+
+Formulate an improved question.
+Rewritten question:
+"""
+
+websearch_query_rewrite_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+system_prompt = """
+You are a helpful assistant. Provide a answer to the user.
+"""
+
+simple_question_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", "{question}"),
+    ]
+)
+========================================
+
+File Name: core\agents\langgraph\complex_agent\state.py
+========================================
+from pydantic import BaseModel
+from typing import List, Literal, Optional
+
+class GraphState(BaseModel):
+
+    question: Optional[str] = None
+    generation: Optional[str] = None
+    documents: List[str] = []
+    rewritten_question: Optional[str] = None
+    query_feedbacks: List[str] = []
+    generation_feedbacks: List[str] = []
+    generation_num: int = 0
+    retrieval_num: int = 0
+    search_mode: Literal["vectorstore", "websearch", "QA_LM"] = "QA_LM"
+========================================
+
+File Name: core\agents\langgraph\complex_agent\tools.py
+========================================
+import os
+from langchain_community.tools.tavily_search import TavilySearchResults
+from dotenv import load_dotenv
+
+load_dotenv()
+
+web_search_tool = TavilySearchResults(k=4)
+========================================
+
+File Name: core\agents\langgraph\complex_agent\utils.py
+========================================
+from typing import Literal
+from pydantic import BaseModel, Field
+
+class GradeHallucinations(BaseModel):
+    binary_score: Literal["yes", "no"] = Field(
+        description="Answer is grounded in the facts, 'yes' or 'no'"
+    )
+
+class GradeDocuments(BaseModel):
+    binary_score: Literal["yes", "no"] = Field(
+        description="Document is relevant to the question, 'yes' or 'no'"
+    )
+
+class GradeAnswer(BaseModel):
+    binary_score: Literal["yes", "no"] = Field(
+        description="Answer addresses the question, 'yes' or 'no'"
+    )
+
+class RouteQuery(BaseModel):
+    route: Literal["vectorstore", "websearch", "QA_LM"] = Field(
+        description="Given a user question choose to route it to web search (websearch), a vectorstore (vectorstore), or a QA language model (QA_LM).",
+    )
+========================================
+
+File Name: core\agents\langgraph\complex_agent\__init__.py
+========================================
+
+========================================
+
+File Name: core\agents\langgraph\simple_agent\agent.py
+========================================
+from typing import Optional
+from langgraph.graph import StateGraph, START, END
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
+from app.core.indexers.chroma_indexer import ChromaIndexer
+from app.core.config.schemas import AgentConfig, RetrieverConfig
+from app.core.config.default_config import DEFAULT_AGENT_CONFIG
+from .prompts import rag_prompt
+from .state import GraphState
+import logging
+
+logger = logging.getLogger(__name__)
+
+class LangSimpleRAG:
+    """LangChain Graph-based Simple RAG Agent"""
+    
+    def __init__(self, config: Optional[AgentConfig] = None):
+        """Initialize the agent with optional configuration"""
+        self.config = config or DEFAULT_AGENT_CONFIG
+        
+        # Initialize all components
+        self._initialize_components()
+        self._initialize_chains()
+        self._initialize_nodes()
+        self.pipeline = self._build_pipeline()
+    
+    def _initialize_components(self):
+        """Initialize base components: LLM and Retriever"""
+        try:
+            # Initialize LLM based on config
+            self.llm = ChatOpenAI(
+                model=self.config.llm.name,
+                **self.config.llm.parameters
+            )
+            
+            # Initialize Retriever with config
+            self.indexer = ChromaIndexer(self.config.retriever)
+            self.retriever = self.indexer.as_retriever()
+            
+            logger.info("Components initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing components: {str(e)}")
+            raise
+    
+    def _initialize_chains(self):
+        """Initialize all LangChain chains"""
+        try:
+            # Basic RAG chain with configured LLM
+            self.rag_chain = rag_prompt | self.llm | StrOutputParser()
+            
+            logger.info("Chains initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing chains: {str(e)}")
+            raise
+            
+    def _initialize_nodes(self):
+        """Initialize graph nodes"""
+        try:
+            # Retrieval node function
+            def retriever_node(state: GraphState):
+                new_documents = self.retriever.invoke(state.question)
+                new_documents = [d.page_content for d in new_documents]
+                state.documents.extend(new_documents)
+                return {"documents": state.documents}
+            
+            # Generation node function
+            def generation_node(state: GraphState):
+                generation = self.rag_chain.invoke({
+                    "context": "\n\n".join(state.documents), 
+                    "question": state.question, 
+                })
+                return {"generation": generation}
+            
+            # Store nodes for pipeline building
+            self.retriever_node = retriever_node
+            self.generation_node = generation_node
+            
+            logger.info("Nodes initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing nodes: {str(e)}")
+            raise
+    
+    def _build_pipeline(self) -> StateGraph:
+        """Build the LangGraph pipeline"""
+        try:
+            # Create graph
+            graph = StateGraph(GraphState)
+            
+            # Add nodes
+            graph.add_node('retrieval_node', self.retriever_node)
+            graph.add_node('generator_node', self.generation_node)
+            
+            # Connect nodes
+            graph.add_edge(START, 'retrieval_node')
+            graph.add_edge('retrieval_node', 'generator_node')
+            graph.add_edge('generator_node', END)
+            
+            logger.info("Pipeline built successfully")
+            return graph.compile()
+            
+        except Exception as e:
+            logger.error(f"Error building pipeline: {str(e)}")
+            raise
+
+    def run(self, question: str) -> str:
+        """Run the agent synchronously
+        
+        Args:
+            question: The question to answer
+            
+        Returns:
+            str: Generated answer
+            
+        Raises:
+            Exception: If any error occurs during execution
+        """
+        try:
+            inputs = {"question": question}
+            result = self.pipeline.invoke(inputs)
+            return result["generation"]
+        except Exception as e:
+            logger.error(f"Error running agent: {str(e)}")
+            raise
+
+    def stream(self, question: str):
+        """Stream the agent's response
+        
+        Args:
+            question: The question to answer
+            
+        Yields:
+            dict: Stream of updates from the pipeline
+            
+        Raises:
+            Exception: If any error occurs during execution
+        """
+        try:
+            inputs = {"question": question}
+            for output in self.pipeline.stream(inputs, stream_mode='updates'):
+                yield output
+        except Exception as e:
+            logger.error(f"Error streaming response: {str(e)}")
+            raise
+========================================
+
+File Name: core\agents\langgraph\simple_agent\prompts.py
+========================================
+from langchain_core.prompts import ChatPromptTemplate
+
+system_prompt = """
+You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. 
+If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
+Only provide the answer and nothing else!
+"""
+
+human_prompt = """
+Question: {question}
+
+Context: 
+{context}
+
+Answer:
+"""
+
+rag_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", human_prompt),
+    ]
+)
+
+
+========================================
+
+File Name: core\agents\langgraph\simple_agent\state.py
+========================================
+from typing import List, Optional
+from pydantic import BaseModel
+
+class GraphState(BaseModel):
+    #Graph Parameterss
+    question: Optional[str] = None
+    generation: Optional[str] = None
+    documents: List[str] = []
+
+========================================
+
+File Name: core\agents\langgraph\simple_agent\utils.py
+========================================
+
+========================================
+
+File Name: core\agents\langgraph\simple_agent\__init__.py
+========================================
+
+
+========================================
+
+File Name: core\chunkers\simple_chunker.py
+========================================
+from typing import List
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+class SimpleChunker:
+    def __init__(self, chunk_size=10000, chunk_overlap=200):
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+    
+    def split_documents(self, documents: List[Document]) -> List[Document]:
+        return self.text_splitter.split_documents(documents)
+    
+    def split_text(self, text: str) -> List[str]:
+        return self.text_splitter.split_text(text)
+========================================
+
+File Name: core\chunkers\__init__.py
+========================================
+
+========================================
+
+File Name: core\config\default_config.py
+========================================
+from typing import Optional, Dict, Any, Literal
+from .schemas import (
+    LLMConfig,
+    EmbeddingConfig,
+    DatabaseConfig,
+    RetrieverConfig,
+    AgentConfig
+)
+
+# Available Language Models
+AVAILABLE_LLMS: Dict[str, LLMConfig] = {
+    "gpt-4o-mini": LLMConfig(
+        name="gpt-4o-mini",
+        type="openai",
+        parameters={
+            "temperature": 0.7,
+        }
+    ),
+}
+
+# Available Embedding Models
+AVAILABLE_EMBEDDINGS: Dict[str, EmbeddingConfig] = {
+    "text-embedding-3-small": EmbeddingConfig(
+        name="text-embedding-3-small",
+        type="openai",
+        parameters={}
+    ),
+}
+
+# Available Vector Stores
+AVAILABLE_DATABASES = ["ChromaDB"]  # Add more as needed
+
+# Available Search Types
+AVAILABLE_SEARCH_TYPES = ["similarity", "mmr", "similarity_score_threshold"]
+
+# Default Configurations
+DEFAULT_LLM = AVAILABLE_LLMS["gpt-4o-mini"]
+
+DEFAULT_EMBEDDING = AVAILABLE_EMBEDDINGS["text-embedding-3-small"]
+
+DEFAULT_DATABASE = DatabaseConfig(
+    database_type="ChromaDB",
+    collection_name="default_collection",
+    embedding=DEFAULT_EMBEDDING,
+    parameters={
+        "persist_directory": "./app/databases/chroma_db",
+    }
+)
+
+DEFAULT_RETRIEVER = RetrieverConfig(
+    collection_name="default_collection",
+    search_type="similarity",
+    k=4,
+    search_parameters={}
+)
+
+DEFAULT_AGENT_CONFIG = AgentConfig(
+    llm=DEFAULT_LLM,
+    retriever=DEFAULT_RETRIEVER,
+    agent_parameters={}
+)
+
+def get_llm_config(model_name: str) -> LLMConfig:
+    """Get LLM configuration by model name"""
+    if model_name not in AVAILABLE_LLMS:
+        raise ValueError(f"Model {model_name} not found in available models")
+    return AVAILABLE_LLMS[model_name]
+
+def get_embedding_config(model_name: str) -> EmbeddingConfig:
+    """Get embedding configuration by model name"""
+    if model_name not in AVAILABLE_EMBEDDINGS:
+        raise ValueError(f"Embedding model {model_name} not found in available models")
+    return AVAILABLE_EMBEDDINGS[model_name]
+
+def create_agent_config(
+    llm_name: str = "gpt-4o-mini",
+    collection_name: str = "default_collection",
+    search_type: str = "similarity",
+    k: int = 4,
+    search_parameters: Optional[Dict[str, Any]] = None,
+    agent_parameters: Optional[Dict[str, Any]] = None
+) -> AgentConfig:
+    """Create an agent configuration with specified parameters"""
+    llm_config = get_llm_config(llm_name)
+    
+    retriever_config = RetrieverConfig(
+        collection_name=collection_name,
+        search_type=search_type,
+        k=k,
+        search_parameters=search_parameters or {}
+    )
+    
+    return AgentConfig(
+        llm=llm_config,
+        retriever=retriever_config,
+        agent_parameters=agent_parameters or {}
+    )
+========================================
+
+File Name: core\config\schemas.py
+========================================
+from typing import Optional, Dict, Any, Literal
+from pydantic import BaseModel, Field, ConfigDict
+
+class LLMConfig(BaseModel):
+    """Base configuration for Language Models"""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    name: str = Field(..., description="Name of the model")
+    type: str = Field(..., description="Type of the model (e.g., openai, anthropic)")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional parameters like temperature, max_tokens etc."
+    )
+
+class EmbeddingConfig(BaseModel):
+    """Configuration for embedding models"""
+    model_config = ConfigDict(protected_namespaces=())
+    
+    name: str = Field(..., description="Name of the embedding model")
+    type: str = Field(..., description="Type of the model (e.g., openai, huggingface)")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional parameters for the embedding model"
+    )
+
+class DatabaseConfig(BaseModel):
+    """Base configuration for Vector Stores"""
+    database_type: str = Field(..., description="Type of vector store (e.g., chroma, pinecone)")
+    collection_name: str = Field(..., description="Name of the collection")
+    embedding: EmbeddingConfig = Field(..., description="Embedding model configuration")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Database-specific parameters"
+    )
+    
+class RetrieverConfig(BaseModel):
+    """Base configuration for Retrievers"""
+    collection_name: str = Field(..., description="Name of the collection to retrieve from")
+    search_type: str = Field(
+        default="similarity",
+        description="Type of search (similarity, mmr, etc.)"
+    )
+    k: int = Field(default=4, description="Number of documents to retrieve")
+    search_parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional search parameters"
+    )
+
+class AgentConfig(BaseModel):
+    """Complete agent configuration"""
+    llm: LLMConfig = Field(..., description="Language model configuration")
+    retriever: RetrieverConfig = Field(..., description="Retriever configuration")
+    agent_parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Agent-specific parameters (e.g., max_retrievals, max_generations for LangComplexRAG)"
+    )
+
+========================================
+
+File Name: core\config\__init__.py
+========================================
+
+========================================
+
+File Name: core\indexers\chroma_indexer.py
+========================================
+from langchain_core.documents import Document
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+from chromadb import PersistentClient
+from app.core.config.schemas import DatabaseConfig
+from langchain_core.documents import Document
+from app.core.config.schemas import DatabaseConfig, RetrieverConfig
+from app.core.config.default_config import DEFAULT_DATABASE, DEFAULT_RETRIEVER
+from dotenv import load_dotenv
+from typing import List, Dict, Any, Optional
+import logging
+import os
+
+load_dotenv()
+logger = logging.getLogger(__name__)
+
+class ChromaDB:
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(ChromaDB, cls).__new__(cls)
+            # Initialize with default configuration
+            cls._instance._initialize_default()
+        return cls._instance
+    
+    def _initialize_default(self):
+        """Initialize with default settings"""
+        self.embedding_function = OpenAIEmbeddings(model=DEFAULT_DATABASE.embedding.name)
+        self.persist_directory = "./app/databases/chroma_db"
+        self.client = None
+        self.vectorstore = None
+        
+    def reconfigure(self, config: DatabaseConfig):
+        """Reconfigure the database with new settings"""
+        try:
+            # Initialize embedding function based on config
+            if config.embedding.type == "openai":
+                self.embedding_function = OpenAIEmbeddings(
+                    model=config.embedding.name,
+                    **config.embedding.parameters
+                )
+            # Add other embedding types here as needed
+            
+            # Reset client and vectorstore
+            self.client = None
+            self.vectorstore = None
+            
+            # Connect with new configuration
+            self._connect()
+            logger.info("Database reconfigured successfully")
+            
+        except Exception as e:
+            logger.error(f"Error reconfiguring database: {str(e)}")
+            raise
+        
+    def _connect(self):
+        """Create or connect to the ChromaDB client"""
+        try:
+            if not self.client:
+                if not os.path.exists(self.persist_directory):
+                    os.makedirs(self.persist_directory)
+                self.client = PersistentClient(path=self.persist_directory)
+        except Exception as e:
+            logger.error(f"Error connecting to ChromaDB: {str(e)}")
+            raise
+    
+    def initialize_db(self, collection_name="default_collection"):
+        """Initialize or connect to a ChromaDB collection"""
+        try:
+            self._connect()
+            
+            self.vectorstore = Chroma(
+                collection_name=collection_name,
+                embedding_function=self.embedding_function,
+                persist_directory=self.persist_directory,
+                client=self.client
+            )
+            return self.vectorstore
+        except Exception as e:
+            logger.error(f"Error initializing database: {str(e)}")
+            raise
+            
+    def create_collection(self, collection_name: str):
+        """Create a new collection"""
+        try:
+            self._connect()
+            return self.initialize_db(collection_name)
+        except Exception as e:
+            logger.error(f"Error creating collection: {str(e)}")
+            raise
+    
+    def delete_collection(self, collection_name: str):
+        """Delete a collection"""
+        try:
+            self._connect()
+            if self.vectorstore and self.vectorstore._collection.name == collection_name:
+                self.vectorstore = None
+            self.client.delete_collection(collection_name)
+        except Exception as e:
+            logger.error(f"Error deleting collection: {str(e)}")
+            raise
+    
+    def list_collections(self):
+        """List all collections"""
+        try:
+            self._connect()
+            return [col.name for col in self.client.list_collections()]
+        except Exception as e:
+            logger.error(f"Error listing collections: {str(e)}")
+            raise
+
+# Global instance initialized with default settings
+chroma_db = ChromaDB()
+
+class ChromaIndexer:
+    def __init__(self, config: Optional[RetrieverConfig] = None):
+        """Initialize ChromaIndexer with retriever configuration
+        
+        Args:
+            config: RetrieverConfig for search operations. If None, uses default config.
+        """
+        self.config = config or DEFAULT_RETRIEVER
+        self.vectorstore = chroma_db.initialize_db(self.config.collection_name)
+    
+    def add_documents(self, documents: List[Document]):
+        """Add documents to the vectorstore"""
+        self.vectorstore.add_documents(documents)
+    
+    def similarity_search(
+        self, 
+        query: str,
+        config: Optional[RetrieverConfig] = None
+    ):
+        """Perform similarity search with optional retriever configuration
+        
+        Args:
+            query: Search query string
+            config: Optional RetrieverConfig to override default settings
+        """
+        try:
+            search_config = config or self.config
+            
+            if search_config.search_type == "mmr":
+                return self.vectorstore.max_marginal_relevance_search(
+                    query,
+                    k=search_config.k,
+                    **search_config.search_parameters
+                )
+            else:  # default similarity search
+                return self.vectorstore.similarity_search(
+                    query,
+                    k=search_config.k,
+                    **search_config.search_parameters
+                )
+        except Exception as e:
+            logger.error(f"Error in similarity search: {str(e)}")
+            raise
+    
+    def update_document(self, document_id: str, document: Document):
+        """Update a document in the vectorstore"""
+        self.vectorstore.update_document(document_id, document)
+    
+    def delete_document(self, document_id: str):
+        """Delete a document from the vectorstore"""
+        self.vectorstore.delete([document_id])
+    
+    def as_retriever(self, config: Optional[RetrieverConfig] = None):
+        """Get retriever with optional configuration
+        
+        Args:
+            config: Optional RetrieverConfig to override default settings
+        """
+        try:
+            search_config = config or self.config
+            
+            search_kwargs = {
+                "k": search_config.k,
+                **search_config.search_parameters
+            }
+            
+            return self.vectorstore.as_retriever(
+                search_type=search_config.search_type,
+                search_kwargs=search_kwargs
+            )
+        except Exception as e:
+            logger.error(f"Error creating retriever: {str(e)}")
+            raise
+    
+    def count_documents(self):
+        """Count documents in the collection"""
+        return self.vectorstore._collection.count()
+========================================
+
+File Name: core\indexers\__init__.py
+========================================
+
+========================================
+
+File Name: core\loaders\gdrive_loader.py
+========================================
+import os
+from app.services import google_drive
+import logging
+
+logger = logging.getLogger(__name__)
+
+class GDriveLoader:
+    def __init__(self):
+        self.service = None
+
+    def authenticate(self):
+        return google_drive.authenticate()
+
+    def set_credentials(self, authorization_response, state):
+        creds = google_drive.get_credentials_from_callback(authorization_response, state)
+        google_drive.save_credentials(creds)
+
+    def initialize_service(self):
+        if not self.service:
+            self.service = google_drive.get_service()
+
+    def download_files(self, folder_id):
+        """Download files from a Google Drive folder"""
+        try:
+            if not self.service:
+                self.initialize_service()
+
+            downloaded_files = google_drive.download_files(self.service, folder_id)
+            
+            if not downloaded_files:
+                logger.warning(f"No files found in folder {folder_id}")
+                return []
+
+            # Return only the filenames for the UI
+            return [os.path.basename(file_path) for file_path in downloaded_files]
+
+        except Exception as e:
+            logger.error(f"Error downloading files: {str(e)}")
+            raise
+========================================
+
+File Name: core\loaders\__init__.py
+========================================
+
+========================================
+
+File Name: core\pipes\simple_index_pipeline.py
+========================================
+import os
+from typing import List
+from langchain_community.document_loaders import PyPDFLoader
+from app.core.chunkers.simple_chunker import SimpleChunker
+from app.core.indexers.chroma_indexer import ChromaIndexer
+from app.core.config.schemas import RetrieverConfig
+from langchain_core.documents import Document
+import logging
+
+logger = logging.getLogger(__name__)
+
+class SimpleIndexChromaPipeline:
+    def __init__(self, collection_name: str, chunk_size: int = 10000, chunk_overlap: int = 200):
+        """Initialize the pipeline with collection name and chunking parameters.
+        
+        Args:
+            collection_name: Name of the collection to store documents
+            chunk_size: Size of document chunks (default: 10000)
+            chunk_overlap: Overlap between chunks (default: 200)
+        """
+        try:
+            # Create retriever config
+            self.retriever_config = RetrieverConfig(collection_name=collection_name)
+            
+            self.collection_name = collection_name
+            self.loader = PyPDFLoader
+            self.chunker = SimpleChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+            self.indexer = ChromaIndexer(self.retriever_config)
+        except Exception as e:
+            logger.error(f"Error initializing pipeline: {str(e)}")
+            raise
+
+    def process_pdf(self, file_path: str) -> List[Document]:
+        """Process a single PDF file.
+        
+        Args:
+            file_path: Path to the PDF file
+            
+        Returns:
+            List of processed Document objects
+            
+        Raises:
+            FileNotFoundError: If the PDF file doesn't exist
+            ValueError: If the file is not a valid PDF
+            Exception: For other processing errors
+        """
+        try:
+            # Verify file exists and is PDF
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+            if not file_path.lower().endswith('.pdf'):
+                raise ValueError(f"File is not a PDF: {file_path}")
+                
+            logger.info(f"Processing PDF: {file_path}")
+            
+            # Load PDF
+            loader = self.loader(file_path)
+            documents = loader.load()
+            
+            if not documents:
+                logger.warning(f"No content extracted from PDF: {file_path}")
+                return []
+            
+            # Add file metadata to each document
+            filename = os.path.basename(file_path)
+            for doc in documents:
+                doc.metadata.update({
+                    "source_file": filename,
+                    "file_path": file_path,
+                    "page_number": doc.metadata.get("page", 1)
+                })
+
+            # Chunk documents
+            chunked_documents = self.chunker.split_documents(documents)
+            
+            if not chunked_documents:
+                logger.warning(f"No chunks created from PDF: {file_path}")
+                return []
+            
+            # Ensure metadata is preserved in chunks
+            for chunk in chunked_documents:
+                if not chunk.metadata.get("source_file"):
+                    chunk.metadata.update({
+                        "source_file": filename,
+                        "file_path": file_path,
+                        "page_number": chunk.metadata.get("page", 1)
+                    })
+
+            # Index documents
+            self.indexer.add_documents(chunked_documents)
+            
+            logger.info(f"Successfully processed PDF {filename} into {len(chunked_documents)} chunks")
+            return chunked_documents
+
+        except FileNotFoundError as e:
+            logger.error(f"File not found error: {str(e)}")
+            raise
+        except ValueError as e:
+            logger.error(f"Invalid file error: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error processing PDF {file_path}: {str(e)}")
+            raise
+
+    def process_multiple_pdfs(self, file_paths: List[str]) -> List[Document]:
+        """Process multiple PDF files.
+        
+        Args:
+            file_paths: List of paths to PDF files
+            
+        Returns:
+            List of processed Document objects from all PDFs
+            
+        Raises:
+            Exception: If any file processing fails
+        """
+        try:
+            all_documents = []
+            failed_files = []
+            
+            for file_path in file_paths:
+                try:
+                    processed_docs = self.process_pdf(file_path)
+                    all_documents.extend(processed_docs)
+                except Exception as e:
+                    logger.error(f"Failed to process {file_path}: {str(e)}")
+                    failed_files.append((file_path, str(e)))
+            
+            if failed_files:
+                logger.warning(f"Failed to process {len(failed_files)} files")
+                # Could raise an exception with failed files info if needed
+                
+            return all_documents
+            
+        except Exception as e:
+            logger.error(f"Error in batch processing PDFs: {str(e)}")
+            raise
+
+    def process_folder(self, folder_path: str) -> List[Document]:
+        """Process all PDF files in a folder.
+        
+        Args:
+            folder_path: Path to folder containing PDF files
+            
+        Returns:
+            List of processed Document objects from all PDFs
+            
+        Raises:
+            NotADirectoryError: If folder_path is not a directory
+            Exception: For other processing errors
+        """
+        try:
+            if not os.path.isdir(folder_path):
+                raise NotADirectoryError(f"Not a directory: {folder_path}")
+                
+            all_documents = []
+            pdf_files = []
+            
+            # First collect all PDF files
+            for root, _, files in os.walk(folder_path):
+                for file in files:
+                    if file.lower().endswith('.pdf'):
+                        file_path = os.path.join(root, file)
+                        pdf_files.append(file_path)
+            
+            if not pdf_files:
+                logger.warning(f"No PDF files found in folder: {folder_path}")
+                return []
+                
+            logger.info(f"Found {len(pdf_files)} PDF files in {folder_path}")
+            
+            # Process all collected PDFs
+            return self.process_multiple_pdfs(pdf_files)
+            
+        except NotADirectoryError as e:
+            logger.error(f"Directory error: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error processing folder {folder_path}: {str(e)}")
+            raise
+========================================
+
+File Name: core\pipes\__init__.py
+========================================
+
+========================================
+
+File Name: core\processors\__init__.py
+========================================
+
+========================================
+
+File Name: databases\__init__.py
+========================================
+
+========================================
+
+File Name: notebooks\__init__.py
+========================================
+
+========================================
+
+File Name: services\google_drive.py
+========================================
+import os
+import io
+import pickle
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+from google.auth.transport.requests import Request as GoogleRequest
+from googleapiclient.errors import HttpError
+import logging
+
+# Allow OAuth2 insecure transport for development
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
+logger = logging.getLogger(__name__)
+
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+CLIENT_SECRETS_FILE = 'app/configs/credentials.json'
+REDIRECT_URI = "http://localhost:8000/gdrive/oauth2callback"
+DOWNLOAD_FOLDER = 'data/raw_data'
+
+# MIME type mappings for Google Workspace files
+GOOGLE_MIME_TYPES = {
+    'application/vnd.google-apps.document': ('application/pdf', '.pdf'),
+    'application/vnd.google-apps.spreadsheet': ('application/pdf', '.pdf'),
+    'application/vnd.google-apps.presentation': ('application/pdf', '.pdf'),
+    'application/vnd.google-apps.drawing': ('application/pdf', '.pdf'),
+}
+
+def authenticate():
+    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES)
+    flow.redirect_uri = REDIRECT_URI
+    authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
+    return authorization_url, state
+
+def get_credentials_from_callback(authorization_response, state):
+    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES, state=state)
+    flow.redirect_uri = REDIRECT_URI
+    flow.fetch_token(authorization_response=authorization_response)
+    return flow.credentials
+
+def save_credentials(creds):
+    with open('token.pickle', 'wb') as token:
+        pickle.dump(creds, token)
+
+def get_service():
+    creds = None
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(GoogleRequest())
+        else:
+            raise Exception("Credentials are not valid, please authorize again.")
+    return build('drive', 'v3', credentials=creds)
+
+def list_files_in_folder(service, folder_id):
+    query = f"'{folder_id}' in parents and (mimeType='application/pdf' or mimeType contains 'application/vnd.google-apps.')"
+    try:
+        results = service.files().list(
+            q=query,
+            pageSize=1000,
+            fields="nextPageToken, files(id, name, mimeType)"
+        ).execute()
+        return results.get('files', [])
+    except HttpError as error:
+        logger.error(f"Error listing files: {str(error)}")
+        raise
+
+def download_file(service, file_id, file_name, mime_type, folder_path=DOWNLOAD_FOLDER):
+    """Download or export a file from Google Drive"""
+    try:
+        # Create the download folder if it doesn't exist
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+
+        if mime_type in GOOGLE_MIME_TYPES:
+            # Export Google Workspace files
+            export_mime_type, extension = GOOGLE_MIME_TYPES[mime_type]
+            request = service.files().export_media(
+                fileId=file_id,
+                mimeType=export_mime_type
+            )
+            # Ensure the filename has the correct extension
+            if not file_name.endswith(extension):
+                file_name = f"{file_name}{extension}"
+        else:
+            # Direct download for other files
+            request = service.files().get_media(fileId=file_id)
+
+        file_path = os.path.join(folder_path, file_name)
+        fh = io.FileIO(file_path, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+            logger.info(f"Downloading {file_name}: {int(status.progress() * 100)}%")
+
+        logger.info(f"Downloaded {file_name} to {file_path}")
+        return file_path
+
+    except Exception as e:
+        logger.error(f"Error downloading file {file_name}: {str(e)}")
+        raise
+
+def download_files(service, folder_id):
+    """Download all files from a folder"""
+    try:
+        files = list_files_in_folder(service, folder_id)
+        if not files:
+            return []
+
+        downloaded_files = []
+        for file in files:
+            try:
+                file_path = download_file(
+                    service,
+                    file['id'],
+                    file['name'],
+                    file['mimeType']
+                )
+                downloaded_files.append(file_path)
+            except Exception as e:
+                logger.error(f"Error downloading {file['name']}: {str(e)}")
+                continue
+
+        return downloaded_files
+
+    except Exception as e:
+        logger.error(f"Error downloading files from folder: {str(e)}")
+        raise
+========================================
+
+File Name: services\__init__.py
+========================================
+
+========================================
+
+File Name: utils\__init__.py
+========================================
+
+========================================
+

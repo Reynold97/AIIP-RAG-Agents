@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Body, File, UploadFile, Query
+from pydantic import BaseModel
 from typing import List, Optional
 from app.core.config.schemas import RetrieverConfig
 from app.core.indexers.chroma_indexer import ChromaIndexer
@@ -39,7 +40,7 @@ async def add_documents(
 @router.post("/{collection_name}/search", summary="Search documents in collection")
 async def search_documents(
     collection_name: str,
-    query: str = Query(..., description="Search query"),
+    query: str = Body(..., embed=True, description="Search query"),
     retriever_config: Optional[RetrieverConfig] = Body(
         default=None,
         description="""Optional retriever configuration.
@@ -47,12 +48,9 @@ async def search_documents(
         MMR parameters: fetch_k, lambda_mult.
         Similarity threshold parameters: score_threshold.""",
         example={
-            "search_type": "mmr",
+            "search_type": "similarity",
             "k": 4,
-            "search_parameters": {
-                "fetch_k": 20,
-                "lambda_mult": 0.5
-            }
+            "search_parameters": {}
         }
     )
 ):

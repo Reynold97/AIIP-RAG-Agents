@@ -1,13 +1,13 @@
 # API endpoint configurations
 API_BASE_URL = "http://localhost:8000"
 
+# Database operations endpoints
 DB_ENDPOINTS = {
     "create": f"{API_BASE_URL}/chromadb/create",
     "delete": f"{API_BASE_URL}/chromadb/delete",
     "create_collection": f"{API_BASE_URL}/chromadb/collections",  # /{collection_name}
     "delete_collection": f"{API_BASE_URL}/chromadb/collections",  # /{collection_name}
     "list_collections": f"{API_BASE_URL}/chromadb/collections",
-    "list_embeddings": f"{API_BASE_URL}/chromadb/embeddings",  # New endpoint
 }
 
 # Index operations endpoints
