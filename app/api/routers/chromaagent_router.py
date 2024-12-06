@@ -25,15 +25,16 @@ router = APIRouter(prefix="/agent", tags=["Agents"])
     response_description="The agent's answer or a stream of updates"
 )
 async def simple_rag_agent(
-    question: str = Query(..., description="The question to ask the agent"),
-    stream: bool = Query(
+    question: str = Body(..., embed=True, description="The question to ask the agent"),
+    stream: bool = Body( 
+        embed=True,
         default=False, 
         description="Whether to stream the response or return a single answer"
     ),
     config: Optional[AgentConfig] = Body(
-        default=None,
+        #default=None,
         description="Optional agent configuration. If not provided, uses default settings.",
-        example={
+        default={
             "llm": {
                 "name": "gpt-4o-mini",
                 "type": "openai",
@@ -96,15 +97,16 @@ async def simple_rag_agent(
     response_description="The agent's answer or a stream of updates"
 )
 async def complex_rag_agent(
-    question: str = Query(..., description="The question to ask the agent"),
-    stream: bool = Query(
+    question: str = Body(..., embed=True, description="The question to ask the agent"),
+    stream: bool = Body(
+        embed=True,
         default=False, 
         description="Whether to stream the response or return a single answer"
     ),
     config: Optional[AgentConfig] = Body(
-        default=None,
+        #default=None,
         description="Optional agent configuration. If not provided, uses default settings.",
-        example={
+        default={
             "llm": {
                 "name": "gpt-4o-mini",
                 "type": "openai",
@@ -120,7 +122,7 @@ async def complex_rag_agent(
             },
             "agent_parameters": {
                 "max_retrievals": 3,
-                "max_generations": 3
+                "max_generations": 3,
             }
         }
     )

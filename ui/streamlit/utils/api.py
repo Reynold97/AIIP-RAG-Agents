@@ -1,9 +1,10 @@
+import json
 import requests
-from typing import Optional, Dict, Any, List
+from typing import Callable, Generator, Optional, Dict, Any, List, Union, Iterator
 import logging
 from pathlib import Path
 import os
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -218,3 +219,97 @@ class GDriveClient:
         """Download files from Google Drive folder"""
         url = f"{self.endpoints['download_files']}/{folder_id}"
         return APIClient.make_request("GET", url)
+
+class AgentResponse:
+    """Wrapper class for agent responses to handle both streaming and non-streaming cases"""
+    def __init__(self, data: Union[Dict[str, Any], Callable[[], Iterator[Dict[str, Any]]], Iterator[Dict[str, Any]]], is_streaming: bool):
+        self.data = data
+        self.is_streaming = is_streaming
+        self._iterator = None
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get value from response data"""
+        if self.is_streaming:
+            raise ValueError("Cannot use get() on streaming response. Use iterate() instead.")
+        return self.data.get(key, default)
+    
+    def iterate(self) -> Iterator[Dict[str, Any]]:
+        """Iterate over streaming response"""
+        if not self.is_streaming:
+            raise ValueError("Cannot iterate non-streaming response. Use get() instead.")
+        
+        # If data is a generator function, call it once
+        if self._iterator is None:
+            if callable(self.data):
+                self._iterator = self.data()
+            else:
+                self._iterator = self.data
+                
+        return self._iterator
+
+class AgentClient:
+    """Client for RAG Agent operations"""
+    
+    def __init__(self, endpoints: Dict[str, str]):
+        self.endpoints = endpoints
+    
+    @contextmanager
+    def _handle_request_errors(self, operation: str):
+        """Context manager for handling request errors"""
+        try:
+            yield
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error in {operation}: {str(e)}")
+            if hasattr(e.response, 'text'):
+                logger.error(f"Response content: {e.response.text}")
+            raise RuntimeError(f"Error in {operation}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error in {operation}: {str(e)}")
+            raise
+    
+    def _parse_sse_line(self, line: bytes) -> Optional[Dict[str, Any]]:
+        """Parse a single SSE line"""
+        try:
+            if not line:
+                return None
+            line_str = line.decode('utf-8')
+            if not line_str.startswith('data: '):
+                return None
+            return json.loads(line_str[6:])
+        except Exception as e:
+            logger.error(f"Error parsing SSE line: {str(e)}")
+            return {"error": str(e)}
+    
+    def query_agent(
+        self,
+        agent_type: str,
+        question: str,
+        config: Optional[Dict[str, Any]] = None,
+        stream: bool = False
+    ) -> AgentResponse:
+        """Query the RAG agent"""
+        url = f"{self.endpoints['agent']}/{agent_type}"
+        body = {
+            "question": question,
+            "stream": stream,
+            "config": config
+        }
+        
+        logger.debug(f"Sending request to {url} with body: {body}")
+        
+        with self._handle_request_errors("query_agent"):
+            if stream:
+                # Return the generator function instead of calling it
+                def stream_generator():
+                    with requests.post(url, json=body, stream=True) as response:
+                        response.raise_for_status()
+                        for line in response.iter_lines():
+                            if parsed := self._parse_sse_line(line):
+                                yield parsed
+                
+                # Pass the generator function, not the generator object
+                return AgentResponse(stream_generator, is_streaming=True)
+            else:
+                response = requests.post(url, json=body)
+                response.raise_for_status()
+                return AgentResponse(response.json(), is_streaming=False)

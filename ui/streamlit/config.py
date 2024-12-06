@@ -28,6 +28,11 @@ GDRIVE_ENDPOINTS = {
     "download_files": f"{API_BASE_URL}/gdrive/download_files",  # /{folder_id}
 }
 
+# Agent endpoints
+AGENT_ENDPOINTS = {
+    "agent": f"{API_BASE_URL}/agent",  # /{agent_type}
+}
+
 # Styling configurations
 STYLES = {
     "success_color": "#0FBA81",

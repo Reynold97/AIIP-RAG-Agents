@@ -23,6 +23,46 @@ class LangSimpleRAG:
         self._initialize_chains()
         self._initialize_nodes()
         self.pipeline = self._build_pipeline()
+        
+    def run(self, question: str) -> str:
+        """Run the agent synchronously
+        
+        Args:
+            question: The question to answer
+            
+        Returns:
+            str: Generated answer
+            
+        Raises:
+            Exception: If any error occurs during execution
+        """
+        try:
+            inputs = {"question": question}
+            result = self.pipeline.invoke(inputs)
+            return result["generation"]
+        except Exception as e:
+            logger.error(f"Error running agent: {str(e)}")
+            raise
+
+    def stream(self, question: str):
+        """Stream the agent's response
+        
+        Args:
+            question: The question to answer
+            
+        Yields:
+            dict: Stream of updates from the pipeline
+            
+        Raises:
+            Exception: If any error occurs during execution
+        """
+        try:
+            inputs = {"question": question}
+            for output in self.pipeline.stream(inputs, stream_mode='updates'):
+                yield output
+        except Exception as e:
+            logger.error(f"Error streaming response: {str(e)}")
+            raise
     
     def _initialize_components(self):
         """Initialize base components: LLM and Retriever"""
@@ -100,44 +140,4 @@ class LangSimpleRAG:
             
         except Exception as e:
             logger.error(f"Error building pipeline: {str(e)}")
-            raise
-
-    def run(self, question: str) -> str:
-        """Run the agent synchronously
-        
-        Args:
-            question: The question to answer
-            
-        Returns:
-            str: Generated answer
-            
-        Raises:
-            Exception: If any error occurs during execution
-        """
-        try:
-            inputs = {"question": question}
-            result = self.pipeline.invoke(inputs)
-            return result["generation"]
-        except Exception as e:
-            logger.error(f"Error running agent: {str(e)}")
-            raise
-
-    def stream(self, question: str):
-        """Stream the agent's response
-        
-        Args:
-            question: The question to answer
-            
-        Yields:
-            dict: Stream of updates from the pipeline
-            
-        Raises:
-            Exception: If any error occurs during execution
-        """
-        try:
-            inputs = {"question": question}
-            for output in self.pipeline.stream(inputs, stream_mode='updates'):
-                yield output
-        except Exception as e:
-            logger.error(f"Error streaming response: {str(e)}")
             raise

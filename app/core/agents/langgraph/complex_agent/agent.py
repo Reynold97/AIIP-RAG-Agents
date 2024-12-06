@@ -38,7 +38,8 @@ class LangComplexRAG:
     def run(self, question: str) -> str:
         """Run the agent synchronously"""
         try:
-            inputs = {"question": question}
+            recursion_limit = self.config.agent_parameters.get("recursion_limit", 50)
+            inputs = ({"question": question}, {"recursion_limit": recursion_limit})
             result = self.pipeline.invoke(inputs)
             return result["generation"]
         except Exception as e:
@@ -48,7 +49,8 @@ class LangComplexRAG:
     def stream(self, question: str):
         """Stream the agent's response"""
         try:
-            inputs = {"question": question}
+            recursion_limit = self.config.agent_parameters.get("recursion_limit", 50)
+            inputs = ({"question": question}, {"recursion_limit": recursion_limit})
             for output in self.pipeline.stream(inputs, stream_mode='updates'):
                 yield output
         except Exception as e:

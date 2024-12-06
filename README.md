@@ -187,8 +187,8 @@ source env/bin/activate  # Linux/Mac
 .\env\Scripts\activate   # Windows
 
 # Using conda
-conda create -n env python=3.10
-conda activate env
+conda create -p ./env python=3.10 -y
+conda activate ./env
 ```
 
 #### 2. Google Cloud Project Setup
