@@ -1,7 +1,3 @@
-from pathlib import Path
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-from utils.api import AgentResponse
 import streamlit as st
 import sys
 from pathlib import Path
@@ -14,10 +10,9 @@ import json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.api import ChromaDBClient, AgentClient
+from utils.api import ChromaDBClient, AgentClient, AgentResponse
 from components.status import show_status_message
 from config import DB_ENDPOINTS, AGENT_ENDPOINTS
 
@@ -38,6 +33,10 @@ class ChatUI:
             st.session_state.agent_config = None
         if "streaming_enabled" not in st.session_state:
             st.session_state.streaming_enabled = True
+        if "search_type" not in st.session_state:
+            st.session_state.search_type = "similarity"
+        if "search_parameters" not in st.session_state:
+            st.session_state.search_parameters = {}
             
     def _format_docs(self, docs: list) -> str:
         """Format retrieved documents for display"""
@@ -47,6 +46,62 @@ class ChatUI:
             page = doc.get("metadata", {}).get("page_number", "Unknown")
             formatted.append(f"**Source:** {source} (Page {page})\n{doc.get('page_content', '')}\n")
         return "\n---\n".join(formatted)
+
+    def render_advanced_rag_config(self):
+        """Render advanced RAG configuration options"""
+        with st.sidebar.expander("🔧 Advanced RAG Configuration", expanded=False):
+            # Search Type Selection
+            search_type = st.selectbox(
+                "Search Type",
+                options=["similarity", "mmr", "similarity_score_threshold"],
+                index=["similarity", "mmr", "similarity_score_threshold"].index(st.session_state.search_type),
+                help="""
+                - similarity: Standard similarity search
+                - mmr: Maximal Marginal Relevance for diverse results
+                - similarity_score_threshold: Filter by minimum similarity
+                """
+            )
+            st.session_state.search_type = search_type
+            
+            # Search Parameters based on type
+            search_parameters = {}
+            if search_type == "mmr":
+                fetch_k = st.slider(
+                    "Fetch K (MMR)",
+                    min_value=st.session_state.agent_config["retriever"]["k"],
+                    max_value=50,
+                    value=20,
+                    help="Number of documents to fetch before reranking"
+                )
+                lambda_mult = st.slider(
+                    "Lambda (Diversity)",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.5,
+                    help="0 = maximum diversity, 1 = maximum relevance"
+                )
+                search_parameters.update({
+                    "fetch_k": fetch_k,
+                    "lambda_mult": lambda_mult
+                })
+            elif search_type == "similarity_score_threshold":
+                score_threshold = st.slider(
+                    "Score Threshold",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.8,
+                    help="Minimum similarity score (0-1) for results"
+                )
+                search_parameters["score_threshold"] = score_threshold
+            
+            st.session_state.search_parameters = search_parameters
+            
+            # Update retriever config
+            if st.session_state.agent_config:
+                st.session_state.agent_config["retriever"].update({
+                    "search_type": search_type,
+                    "search_parameters": search_parameters
+                })
 
     def render_sidebar(self):
         """Render sidebar with agent configuration options"""
@@ -126,12 +181,12 @@ class ChatUI:
                         help="Maximum number of generation attempts"
                     )
                     recursion_limit = st.slider(
-                            "Recursion Limit",
-                            min_value=25,
-                            max_value=100,
-                            value=50,
-                            help="Maximum number of state transitions in the agent"
-                        )
+                        "Recursion Limit",
+                        min_value=25,
+                        max_value=100,
+                        value=50,
+                        help="Maximum number of state transitions in the agent"
+                    )
                     agent_parameters.update({
                         "max_retrievals": max_retrievals,
                         "max_generations": max_generations,
@@ -149,12 +204,15 @@ class ChatUI:
                     },
                     "retriever": {
                         "collection_name": selected_collection,
-                        "search_type": "similarity",
+                        "search_type": st.session_state.search_type,
                         "k": k,
-                        "search_parameters": {}
+                        "search_parameters": st.session_state.search_parameters
                     },
                     "agent_parameters": agent_parameters
                 }
+                
+                # Render advanced RAG configuration
+                self.render_advanced_rag_config()
                 
                 return True
                 
@@ -163,39 +221,6 @@ class ChatUI:
                 st.error(f"Error configuring agent: {str(e)}")
                 return False
 
-    def handle_streaming_response(self, response: AgentResponse) -> None:
-        """Handle streaming response from agent"""
-        try:
-            message_placeholder = st.empty()
-            full_response = ""
-            retrieved_docs = []
-            
-            for chunk in response.iterate():
-                if isinstance(chunk, dict):
-                    if "error" in chunk:
-                        st.error(f"Error in stream: {chunk['error']}")
-                        break
-                    elif "documents" in chunk:
-                        retrieved_docs = chunk["documents"]
-                        with st.expander("Retrieved Documents", expanded=False):
-                            st.markdown(self._format_docs(retrieved_docs))
-                    elif "generation" in chunk:
-                        current_response = chunk["generation"]
-                        full_response = current_response
-                        message_placeholder.markdown(full_response)
-                else:
-                    logger.warning(f"Unexpected chunk format: {chunk}")
-            
-            if full_response:
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": full_response
-                })
-            
-        except Exception as e:
-            logger.error(f"Error handling stream: {str(e)}", exc_info=True)
-            st.error(f"Error processing response: {str(e)}")
-    
     def handle_non_streaming_response(self, response: AgentResponse) -> None:
         """Handle non-streaming response from agent"""
         try:
@@ -206,6 +231,8 @@ class ChatUI:
                     "role": "assistant", 
                     "content": answer
                 })
+                # Force refresh after adding message
+                st.rerun()
             else:
                 st.error("No valid response received from agent")
                 logger.error(f"Invalid response format: {response.data}")
@@ -216,14 +243,20 @@ class ChatUI:
     def handle_user_input(self):
         """Handle user input and agent interaction"""
         if prompt := st.chat_input("Your question"):
+            # Display user message immediately
+            with st.chat_message("user"):
+                st.markdown(prompt)
+                
+            # Add to history
             st.session_state.messages.append({"role": "user", "content": prompt})
             
-            try:
-                agent_type = "simple" if "Complex RAG" not in st.session_state.get("agent_config", {}).get("agent_parameters", {}) else "complex"
-                streaming = st.session_state.streaming_enabled
-                
-                with st.chat_message("assistant"):
-                    try:
+            # Show assistant response
+            with st.chat_message("assistant"):
+                try:
+                    agent_type = "simple" if "Complex RAG" not in st.session_state.get("agent_config", {}).get("agent_parameters", {}) else "complex"
+                    streaming = False  # Temporarily disable streaming
+                    
+                    with st.spinner("Generating response..."):
                         response = self.agent_client.query_agent(
                             agent_type=agent_type,
                             question=prompt,
@@ -231,19 +264,20 @@ class ChatUI:
                             stream=streaming
                         )
                         
-                        if streaming:
-                            self.handle_streaming_response(response)
+                        answer = response.get("answer")
+                        if answer:
+                            st.markdown(answer)
+                            st.session_state.messages.append({
+                                "role": "assistant", 
+                                "content": answer
+                            })
                         else:
-                            with st.spinner("Generating response..."):
-                                self.handle_non_streaming_response(response)
+                            st.error("No valid response received from agent")
+                            logger.error(f"Invalid response format: {response.data}")
                                 
-                    except Exception as e:
-                        logger.error(f"Error in agent interaction: {str(e)}", exc_info=True)
-                        st.error(f"Error getting response from agent: {str(e)}")
-                    
-            except Exception as e:
-                logger.error(f"Error processing question: {str(e)}", exc_info=True)
-                show_status_message(f"Error processing your question: {str(e)}", type="error")
+                except Exception as e:
+                    logger.error(f"Error in agent interaction: {str(e)}", exc_info=True)
+                    st.error(f"Error getting response from agent: {str(e)}")
 
     def render_chat_history(self):
         """Render chat message history"""
